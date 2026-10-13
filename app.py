@@ -2,16 +2,7 @@ import streamlit as st
 import requests
 from datetime import datetime
 from fpdf import FPDF
-from bs4 import BeautifulSoup
 from io import BytesIO
-
-# curl_cffi for better TLS fingerprinting on BMKG pages
-try:
-    from curl_cffi import requests as curl_requests
-    CURL_AVAILABLE = True
-except ImportError:
-    CURL_AVAILABLE = False
-    st.warning("curl_cffi not installed – BMKG attempts will use normal requests")
 
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 st.title("Yan Weather Report - Sulawesi VFR")
@@ -25,7 +16,7 @@ if st.button("Get Weather", type="primary"):
         report_texts = []
         image_urls = []
 
-        # ---------- WAMM (NOAA – normal requests) ----------
+        # ---------- WAMM (NOAA) ----------
         st.header("WAMM - Sam Ratulangi (Manado)")
         metar_url = "https://aviationweather.gov/api/data/metar?ids=WAMM&format=json"
         taf_url = "https://aviationweather.gov/api/data/taf?ids=WAMM&format=json"
@@ -50,62 +41,67 @@ if st.button("Get Weather", type="primary"):
 
         st.divider()
 
-        # ---------- WAFF with curl_cffi ----------
-        st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
-        waff_url = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
-        st.caption(f"Trying curl_cffi on: {waff_url}")
-        waff_success = False
+        # ---------- WAFF via BMKG official API ----------
+        st.header("WAFF area - BMKG official forecast API (Palu)")
+        adm4 = "72.71.06.1001"  # Kota Palu village code – change if needed
+        api_url = f"https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={adm4}"
+        st.caption(f"Source: {api_url}")
+        report_texts.append(f"WAFF/Palu BMKG API: {api_url}")
 
-        if CURL_AVAILABLE:
-            try:
-                r = curl_requests.get(waff_url, impersonate="chrome", timeout=30)
-                st.write(f"WAFF status: {r.status_code}")
-                if r.status_code == 200 and len(r.text) > 800:
-                    soup = BeautifulSoup(r.text, "html.parser")
-                    full_text = soup.get_text(separator="\n", strip=True)
-                    lines = [ln.strip() for ln in full_text.split("\n") if ln.strip()]
-                    relevant = "\n".join(lines[:80])
-                    st.subheader("BMKG current conditions (curl_cffi)")
-                    st.text(relevant if relevant else "No useful text extracted")
-                    report_texts.append(f"WAFF BMKG (excerpt):\n{relevant[:600]}")
-                    with st.expander("Full extracted text"):
-                        st.text(full_text[:5000])
-                    waff_success = True
+        try:
+            resp = requests.get(api_url, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                # Typical structure: data -> location + list of forecasts
+                forecasts = data.get("data", [])
+                if forecasts:
+                    # Show first several periods
+                    st.subheader("BMKG 3-hourly forecast (excerpt)")
+                    for item in forecasts[:8]:
+                        utc = item.get("utc_datetime", "")
+                        local = item.get("local_datetime", "")
+                        temp = item.get("t", "")
+                        ws = item.get("ws", "")
+                        wd = item.get("wd", "")
+                        tcc = item.get("tcc", "")
+                        vs = item.get("vs_text", "")
+                        desc = item.get("weather_desc_en") or item.get("weather_desc", "")
+                        line = f"{local} | {temp}°C | Wind {wd} {ws} km/h | Clouds {tcc}% | Vis {vs} | {desc}"
+                        st.write(line)
+                        report_texts.append(line)
                 else:
-                    st.warning(f"curl_cffi got status {r.status_code} or little content")
-            except Exception as e:
-                st.warning(f"curl_cffi failed for WAFF: {e}")
-        else:
-            st.info("curl_cffi not available")
+                    st.warning("BMKG API returned no forecast data")
+            else:
+                st.warning(f"BMKG API status {resp.status_code}")
+        except Exception as e:
+            st.warning(f"BMKG API error: {e}")
 
-        if not waff_success:
-            # Open-Meteo fallback
-            try:
-                om_url = "https://api.open-meteo.com/v1/forecast"
-                params = {
-                    "latitude": -0.918,
-                    "longitude": 119.910,
-                    "current": "temperature_2m,wind_speed_10m,wind_direction_10m,visibility,pressure_msl,cloud_cover,weather_code",
-                    "hourly": "temperature_2m,wind_speed_10m,wind_direction_10m,visibility,cloud_cover,precipitation",
-                    "forecast_days": 1,
-                    "wind_speed_unit": "kn",
-                    "timezone": "Asia/Makassar",
-                }
-                om = requests.get(om_url, params=params, timeout=15).json()
-                curr = om.get("current", {})
-                st.subheader("Open-Meteo fallback (current)")
-                st.write(f"**Temp:** {curr.get('temperature_2m')} °C")
-                st.write(f"**Wind:** {curr.get('wind_direction_10m')}° at {curr.get('wind_speed_10m')} kt")
-                st.write(f"**Visibility:** {curr.get('visibility')} m")
-                st.write(f"**Cloud cover:** {curr.get('cloud_cover')} %")
-                st.write(f"**Pressure:** {curr.get('pressure_msl')} hPa")
-                report_texts.append(
-                    f"WAFF Open-Meteo current: Temp {curr.get('temperature_2m')}C, "
-                    f"Wind {curr.get('wind_direction_10m')}°/{curr.get('wind_speed_10m')}kt, "
-                    f"Vis {curr.get('visibility')}m, Clouds {curr.get('cloud_cover')}%"
-                )
-            except Exception as e2:
-                st.error(f"Open-Meteo also failed: {e2}")
+        # Open-Meteo fallback always available
+        try:
+            om_url = "https://api.open-meteo.com/v1/forecast"
+            params = {
+                "latitude": -0.918,
+                "longitude": 119.910,
+                "current": "temperature_2m,wind_speed_10m,wind_direction_10m,visibility,pressure_msl,cloud_cover",
+                "hourly": "temperature_2m,wind_speed_10m,wind_direction_10m,visibility,cloud_cover",
+                "forecast_days": 1,
+                "wind_speed_unit": "kn",
+                "timezone": "Asia/Makassar",
+            }
+            om = requests.get(om_url, params=params, timeout=15).json()
+            curr = om.get("current", {})
+            st.subheader("Open-Meteo current (fallback)")
+            st.write(f"**Temp:** {curr.get('temperature_2m')} °C")
+            st.write(f"**Wind:** {curr.get('wind_direction_10m')}° at {curr.get('wind_speed_10m')} kt")
+            st.write(f"**Visibility:** {curr.get('visibility')} m")
+            st.write(f"**Cloud cover:** {curr.get('cloud_cover')} %")
+            report_texts.append(
+                f"WAFF Open-Meteo: Temp {curr.get('temperature_2m')}C, "
+                f"Wind {curr.get('wind_direction_10m')}°/{curr.get('wind_speed_10m')}kt, "
+                f"Vis {curr.get('visibility')}m"
+            )
+        except Exception as e:
+            st.error(f"Open-Meteo error: {e}")
 
         st.divider()
 
@@ -134,28 +130,18 @@ if st.button("Get Weather", type="primary"):
         '''
         st.components.v1.html(windy_html, height=520)
 
-        # BMKG wind charts with curl_cffi
-        st.subheader("BMKG Wind Charts (curl_cffi attempt)")
-        bmkg_winds = [
-            ("850 hPa", "https://web-aviation.bmkg.go.id/model/windtemp/850_00.png"),
-            ("700 hPa", "https://web-aviation.bmkg.go.id/model/windtemp/700_00.png"),
-        ]
-        for label, url in bmkg_winds:
-            success = False
-            if CURL_AVAILABLE:
-                try:
-                    resp = curl_requests.get(url, impersonate="chrome", timeout=20)
-                    if resp.status_code == 200 and "image" in resp.headers.get("Content-Type", "").lower():
-                        st.write(f"**{label}**")
-                        st.image(resp.content, use_container_width=True)
-                        image_urls.append((f"BMKG {label}", url))
-                        success = True
-                    else:
-                        st.warning(f"Wind data from BMKG not accessible ({label}) – status {resp.status_code}")
-                except Exception as e:
-                    st.warning(f"Wind data from BMKG not accessible ({label}): {e}")
-            if not success:
-                st.warning(f"Wind data from BMKG not accessible ({label})")
+        # BMKG Prakiraan Angin image
+        st.subheader("BMKG Prakiraan Angin (3000 feet streamline)")
+        angin_url = "https://dataweb.bmkg.go.id/cuaca/angin/streamline-d10.jpg"
+        try:
+            img_resp = requests.get(angin_url, timeout=15)
+            if img_resp.status_code == 200 and "image" in img_resp.headers.get("Content-Type", "").lower():
+                st.image(img_resp.content, use_container_width=True)
+                image_urls.append(("BMKG Prakiraan Angin", angin_url))
+            else:
+                st.warning(f"BMKG Prakiraan Angin not accessible – status {img_resp.status_code}")
+        except Exception as e:
+            st.warning(f"BMKG Prakiraan Angin not accessible: {e}")
 
         # ---------- PDF ----------
         st.divider()
@@ -167,7 +153,6 @@ if st.button("Get Weather", type="primary"):
             pdf.cell(0, 8, f"Yan Weather Report - {now}", ln=True)
             pdf.ln(4)
             for block in report_texts:
-                # Basic ASCII-safe text
                 safe_block = block.encode("latin-1", errors="replace").decode("latin-1")
                 pdf.multi_cell(0, 6, safe_block)
                 pdf.ln(3)
