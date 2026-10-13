@@ -2,156 +2,127 @@ import streamlit as st
 import requests
 from datetime import datetime
 from fpdf import FPDF
-from io import BytesIO
-import base64
+from bs4 import BeautifulSoup
+import io
 
-st.set_page_config(page_title="Sulawesi VFR Weather", layout="wide")
-st.title("Sulawesi VFR Weather Report")
-st.caption("One-click briefing for VFR operations below 10,000 ft around Central & North Sulawesi")
+st.set_page_config(page_title="Yan Weather Report", layout="wide")
+
+st.title("Yan Weather Report – Sulawesi VFR")
+st.caption("One-click aviation weather for central & north Sulawesi")
 
 if st.button("Get Weather", type="primary"):
     with st.spinner("Fetching latest data..."):
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-        st.success(f"Report generated: {timestamp}")
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        st.write(f"**Report generated:** {now}")
 
-        # 1. METAR & TAF
-        st.header("1. METAR & TAF — WAMM & WAFF")
-        metar_url = "https://aviationweather.gov/api/data/metar?ids=WAMM,WAFF&format=json"
-        taf_url = "https://aviationweather.gov/api/data/taf?ids=WAMM,WAFF&format=json"
-        
+        # ---------- WAMM (NOAA) ----------
+        st.header("WAMM – Sam Ratulangi (Manado)")
         try:
-            metars = requests.get(metar_url, timeout=15).json()
-            tafs = requests.get(taf_url, timeout=15).json()
-        except Exception as e:
-            st.error(f"Could not fetch METAR/TAF: {e}")
-            metars, tafs = [], []
+            metar_url = "https://aviationweather.gov/api/data/metar?ids=WAMM&format=json"
+            taf_url = "https://aviationweather.gov/api/data/taf?ids=WAMM&format=json"
+            metar = requests.get(metar_url, timeout=10).json()
+            taf = requests.get(taf_url, timeout=10).json()
 
+            if metar:
+                m = metar[0]
+                st.subheader("METAR (decoded)")
+                st.write(f"**Issued:** {m.get('obsTime', 'N/A')}")
+                st.write(f"**Wind:** {m.get('wdir', 'N/A')}° at {m.get('wspd', 'N/A')} kt")
+                st.write(f"**Visibility:** {m.get('visib', 'N/A')}")
+                st.write(f"**Clouds:** {m.get('clouds', 'N/A')}")
+                st.write(f"**Temp/Dew:** {m.get('temp', 'N/A')}°C / {m.get('dewp', 'N/A')}°C")
+                st.write(f"**QNH:** {m.get('altim', 'N/A')} hPa")
+                with st.expander("Raw METAR"):
+                    st.code(m.get("rawOb", "N/A"))
+            else:
+                st.warning("WAMM METAR not available")
+
+            if taf:
+                t = taf[0]
+                st.subheader("TAF (decoded)")
+                st.write(f"**Issued:** {t.get('issueTime', 'N/A')}")
+                st.write(f"**Valid:** {t.get('validTimeFrom', 'N/A')} – {t.get('validTimeTo', 'N/A')}")
+                st.write(f"**Base forecast:** {t.get('fcsts', [{}])[0]}")
+                with st.expander("Raw TAF"):
+                    st.code(t.get("rawTAF", "N/A"))
+            else:
+                st.warning("WAMM TAF not available")
+        except Exception as e:
+            st.error(f"WAMM data error: {e}")
+
+        st.divider()
+
+        # ---------- WAFF (BMKG page) ----------
+        st.header("WAFF – Mutiara SIS Al-Jufrie (Palu)")
+        try:
+            waff_url = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
+            r = requests.get(waff_url, timeout=15)
+            soup = BeautifulSoup(r.text, "html.parser")
+            # Simple extraction of key current values (structure may vary)
+            text = soup.get_text(separator=" | ")
+            st.write("**Current conditions from BMKG:**")
+            st.info(text[:1500])  # show relevant portion
+            st.caption("Source: bmkg.go.id/cuaca/bandara/WAFF")
+        except Exception as e:
+            st.error(f"WAFF data error: {e}")
+
+        st.divider()
+
+        # ---------- Satellite images ----------
+        st.header("Satellite")
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader("WAMM")
-            wamm_m = next((m for m in metars if m.get("icaoId") == "WAMM"), None)
-            wamm_t = next((t for t in tafs if t.get("icaoId") == "WAMM"), None)
-            if wamm_m:
-                st.code(wamm_m.get("rawOb", "No METAR"), language=None)
-                st.write(f"Flight Category: **{wamm_m.get('fltCat', 'N/A')}** | Temp: {wamm_m.get('temp')}°C | Wind: {wamm_m.get('wspd')} kt | Vis: {wamm_m.get('visib')}")
-            else:
-                st.warning("No METAR available")
-            if wamm_t:
-                st.code(wamm_t.get("rawTAF", "No TAF"), language=None)
-            else:
-                st.warning("No TAF available")
-
+            st.subheader("Himawari IR Enhanced")
+            st.image("https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_EH_Indonesia.png", use_container_width=True)
         with col2:
-            st.subheader("WAFF")
-            waff_m = next((m for m in metars if m.get("icaoId") == "WAFF"), None)
-            waff_t = next((t for t in tafs if t.get("icaoId") == "WAFF"), None)
-            if waff_m:
-                st.code(waff_m.get("rawOb", "No METAR"), language=None)
-                st.write(f"Flight Category: **{waff_m.get('fltCat', 'N/A')}** | Temp: {waff_m.get('temp')}°C | Wind: {waff_m.get('wspd')} kt | Vis: {waff_m.get('visib')}")
-            else:
-                st.warning("No METAR available")
-            if waff_t:
-                st.code(waff_t.get("rawTAF", "No TAF"), language=None)
-            else:
-                st.warning("No TAF available")
+            st.subheader("Citra Sebaran Asap")
+            st.image("https://inderaja.bmkg.go.id/Trajektori/Asap.png", use_container_width=True)
 
-        # 2 & 3. Satellites
-        st.header("2. Himawari IR Enhanced (BMKG)")
-        himawari = "https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_EH_Indonesia.png"
-        st.image(himawari, caption="Himawari-9 IR Enhanced — Indonesia (source: BMKG)", use_container_width=True)
+        st.divider()
 
-        st.header("3. Citra Sebaran Asap (BMKG)")
-        asap = "https://inderaja.bmkg.go.id/Trajektori/Asap.png"
-        st.image(asap, caption="Smoke/Haze Distribution (source: BMKG)", use_container_width=True)
+        # ---------- Winds ----------
+        st.header("Low-level Winds")
 
-        # 5. Low-level wind charts (BOM Area E — covers all of Indonesia)
-        st.header("5. Low-Level Wind/Temp Charts (BOM ICAO Area E — FL050 / 850 hPa)")
-        st.caption("Official WAFS charts covering the entire Indian Ocean region including all of Indonesia. Choose the most recent valid time.")
-        
-        wind_charts = {
-            "00Z": "https://www.bom.gov.au/fwo/aviation/IDY01419.png",
-            "06Z": "https://www.bom.gov.au/fwo/aviation/IDY01420.png",
-            "12Z": "https://www.bom.gov.au/fwo/aviation/IDY01421.png",
-            "18Z": "https://www.bom.gov.au/fwo/aviation/IDY01422.png",
-            "+30 hrs": "https://www.bom.gov.au/fwo/aviation/IDY01423.png",
-        }
-        
-        selected_time = st.selectbox("Select chart time", list(wind_charts.keys()), index=0)
-        st.image(wind_charts[selected_time], caption=f"BOM Area E FL050 Wind/Temp — Valid {selected_time}", use_container_width=True)
+        # Primary: Windy embed
+        st.subheader("Windy (primary – interactive)")
+        windy_html = '''
+        <iframe src="https://embed.windy.com/embed2.html?lat=-1.5&lon=121.5&zoom=6&level=surface&overlay=wind&menu=&message=true&marker=&calendar=&pressure=&type=map&location=coordinates&detail=&detailLat=-1.5&detailLon=121.5&metricWind=kt&metricTemp=%C2%B0C&radarRange=-1"
+                width="100%" height="500" frameborder="0"></iframe>
+        '''
+        st.components.v1.html(windy_html, height=520)
 
-        # 4 & 6. Radar + other useful
-        st.header("4 & 6. Radar, Interactive Winds & Other VFR Resources")
-        st.markdown("""
-        **Radar covering Central/North Sulawesi:**  
-        - [Windy Radar + Wind](https://www.windy.com/?120.0,0.9,7) (interactive — best real-time option)  
-        - [RainViewer](https://www.rainviewer.com/)  
-
-        **Other useful free resources:**  
-        - [BMKG Cuaca Map](https://cuaca.bmkg.go.id/map) (wind layers at surface / 850 hPa etc.)  
-        - [Aviation Weather Center](https://aviationweather.gov/) (SIGMETs, more)  
-        - [BOM full Area E charts](https://www.bom.gov.au/aviation/charts/wind-temperature/)  
-        """)
-
-        # PDF generation
-        def create_pdf():
-            pdf = FPDF()
-            pdf.set_auto_page_break(auto=True, margin=15)
-            pdf.add_page()
-            pdf.set_font("Helvetica", "B", 16)
-            pdf.cell(0, 10, "Sulawesi VFR Weather Report", ln=True, align="C")
-            pdf.set_font("Helvetica", size=10)
-            pdf.cell(0, 8, f"Generated: {timestamp}", ln=True, align="C")
-            pdf.ln(5)
-
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(0, 8, "METAR & TAF", ln=True)
-            pdf.set_font("Helvetica", size=9)
-            
-            for label, m, t in [("WAMM", wamm_m, wamm_t), ("WAFF", waff_m, waff_t)]:
-                pdf.cell(0, 6, f"{label}:", ln=True)
-                if m:
-                    pdf.multi_cell(0, 5, m.get("rawOb", "No METAR"))
-                    pdf.cell(0, 5, f"Cat: {m.get('fltCat','N/A')} | Temp: {m.get('temp')}°C | Wind: {m.get('wspd')}kt | Vis: {m.get('visib')}", ln=True)
-                if t:
-                    pdf.multi_cell(0, 5, t.get("rawTAF", "No TAF"))
-                pdf.ln(3)
-
-            # Images
-            pdf.add_page()
-            pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(0, 8, "Himawari IR Enhanced (BMKG)", ln=True)
+        # BMKG wind charts (attempt)
+        st.subheader("BMKG Wind Charts (850 hPa & 700 hPa)")
+        bmkg_winds = [
+            ("850 hPa", "https://web-aviation.bmkg.go.id/model/windtemp/850_00.png"),
+            ("700 hPa", "https://web-aviation.bmkg.go.id/model/windtemp/700_00.png"),
+        ]
+        for label, url in bmkg_winds:
             try:
-                pdf.image(himawari, w=180)
+                resp = requests.get(url, timeout=10)
+                if resp.status_code == 200 and "image" in resp.headers.get("Content-Type", ""):
+                    st.write(f"**{label}**")
+                    st.image(resp.content, use_container_width=True)
+                else:
+                    st.warning(f"Wind data from BMKG not accessible ({label})")
             except:
-                pdf.cell(0, 5, "Image unavailable", ln=True)
+                st.warning(f"Wind data from BMKG not accessible ({label})")
 
-            pdf.add_page()
-            pdf.cell(0, 8, "Citra Sebaran Asap (BMKG)", ln=True)
-            try:
-                pdf.image(asap, w=180)
-            except:
-                pdf.cell(0, 5, "Image unavailable", ln=True)
-
-            pdf.add_page()
-            pdf.cell(0, 8, f"BOM Area E FL050 Wind/Temp ({selected_time})", ln=True)
-            try:
-                pdf.image(wind_charts[selected_time], w=180)
-            except:
-                pdf.cell(0, 5, "Image unavailable", ln=True)
-
-            pdf.add_page()
-            pdf.set_font("Helvetica", size=10)
-            pdf.multi_cell(0, 6, "Radar & other resources:\n- Windy: https://www.windy.com/?120.0,0.9,7\n- BMKG Cuaca Map: https://cuaca.bmkg.go.id/map\n- Full BOM charts: https://www.bom.gov.au/aviation/charts/wind-temperature/")
-
-            return bytes(pdf.output())
-
-        pdf_bytes = create_pdf()
+        # ---------- PDF ----------
+        st.divider()
+        st.subheader("Download PDF")
+        # Simple PDF (text summary + note about images)
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(0, 10, f"Yan Weather Report – {now}", ln=True)
+        pdf.cell(0, 10, "WAMM and WAFF data + satellite + winds", ln=True)
+        pdf.cell(0, 10, "Full interactive version available in the web app.", ln=True)
+        pdf_output = io.BytesIO()
+        pdf.output(pdf_output)
         st.download_button(
-            label="Download PDF Report",
-            data=pdf_bytes,
-            file_name=f"Sulawesi_VFR_Weather_{datetime.utcnow().strftime('%Y%m%d_%H%M')}_UTC.pdf",
-            mime="application/pdf"
+            "Download PDF",
+            data=pdf_output.getvalue(),
+            file_name=f"YanWeather_{now.replace(' ','_').replace(':','')}.pdf",
+            mime="application/pdf",
         )
-
-st.markdown("---")
-st.caption("Data sources: NOAA Aviation Weather Center, BMKG, BOM Australia. Always cross-check official sources before flight. For VFR use only.")
