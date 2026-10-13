@@ -43,7 +43,7 @@ if st.button("Get Weather", type="primary"):
 
         # ---------- WAFF via BMKG official API ----------
         st.header("WAFF area - BMKG official forecast API (Palu)")
-        adm4 = "72.71.06.1001"  # Kota Palu village code – change if needed
+        adm4 = "72.71.06.1001"  # Kota Palu – Nunu / Tatanga area (change if preferred)
         api_url = f"https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={adm4}"
         st.caption(f"Source: {api_url}")
         report_texts.append(f"WAFF/Palu BMKG API: {api_url}")
@@ -52,23 +52,26 @@ if st.button("Get Weather", type="primary"):
             resp = requests.get(api_url, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
-                # Typical structure: data -> location + list of forecasts
-                forecasts = data.get("data", [])
-                if forecasts:
-                    # Show first several periods
-                    st.subheader("BMKG 3-hourly forecast (excerpt)")
-                    for item in forecasts[:8]:
-                        utc = item.get("utc_datetime", "")
-                        local = item.get("local_datetime", "")
-                        temp = item.get("t", "")
-                        ws = item.get("ws", "")
-                        wd = item.get("wd", "")
-                        tcc = item.get("tcc", "")
-                        vs = item.get("vs_text", "")
-                        desc = item.get("weather_desc_en") or item.get("weather_desc", "")
-                        line = f"{local} | {temp}°C | Wind {wd} {ws} km/h | Clouds {tcc}% | Vis {vs} | {desc}"
-                        st.write(line)
-                        report_texts.append(line)
+                cuaca_days = data.get("data", [{}])[0].get("cuaca", [])
+                if cuaca_days:
+                    st.subheader("BMKG 3-hourly forecast")
+                    shown = 0
+                    for day in cuaca_days:
+                        for item in day:
+                            if shown >= 8:
+                                break
+                            local = item.get("local_datetime", "")
+                            temp = item.get("t", "")
+                            ws = item.get("ws", "")
+                            wd = item.get("wd", "")
+                            tcc = item.get("tcc", "")
+                            desc = item.get("weather_desc_en") or item.get("weather_desc", "")
+                            line = f"{local} | {temp}°C | Wind {wd} {ws} km/h | Clouds {tcc}% | {desc}"
+                            st.write(line)
+                            report_texts.append(line)
+                            shown += 1
+                        if shown >= 8:
+                            break
                 else:
                     st.warning("BMKG API returned no forecast data")
             else:
@@ -76,7 +79,7 @@ if st.button("Get Weather", type="primary"):
         except Exception as e:
             st.warning(f"BMKG API error: {e}")
 
-        # Open-Meteo fallback always available
+        # Open-Meteo fallback
         try:
             om_url = "https://api.open-meteo.com/v1/forecast"
             params = {
