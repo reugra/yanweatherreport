@@ -36,12 +36,10 @@ def generate_pdf(timestamp, texts, image_urls):
 
     pdf.set_font("Helvetica", size=9)
     for line in texts:
-        # replace problematic characters
         safe = line.replace("–", "-").replace("—", "-").replace("°", " deg")
         pdf.multi_cell(0, 5, safe)
         pdf.ln(1)
 
-    # Embed images
     for title, url in image_urls:
         try:
             img_resp = requests.get(url, timeout=15)
@@ -62,9 +60,6 @@ now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 # ---------- Collect data for display + PDF ----------
 pdf_texts = [f"Yan Weather Report - {now}", ""]
 image_list = []
-
-# ========== TOP PDF BUTTON ==========
-# (will be re-created after data is ready)
 
 # ========== TIMESTAMP ==========
 st.header(f"Timestamp: {now}")
@@ -104,7 +99,6 @@ image_list.append(("BMKG Prakiraan Angin", angin_url))
 st.header("WAMM")
 pdf_texts.append("\n=== WAMM ===")
 
-# METAR
 metar_url = "https://aviationweather.gov/api/data/metar?ids=WAMM&format=json"
 try:
     m_resp = requests.get(metar_url, timeout=12)
@@ -123,7 +117,6 @@ except Exception as e:
     st.error(f"METAR error: {e}")
     pdf_texts.append(f"METAR error: {e}")
 
-# TAF
 taf_url = "https://aviationweather.gov/api/data/taf?ids=WAMM&format=json"
 try:
     t_resp = requests.get(taf_url, timeout=12)
@@ -144,7 +137,7 @@ except Exception as e:
 
 # ========== WAFF ==========
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
-waff_adm4 = "72.71.06.1001"  # Nunu, Tatanga, Kota Palu
+waff_adm4 = "72.71.06.1001"
 waff_item, waff_err = get_bmkg_current(waff_adm4)
 waff_source = f"https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={waff_adm4}"
 pdf_texts.append("\n=== WAFF ===")
@@ -152,7 +145,7 @@ pdf_texts.append("\n=== WAFF ===")
 if waff_item:
     waff_text = (
         f"{waff_item.get('local_datetime', '')} | "
-        f"{waff_item.get('t', '')}°C | "
+        f"{waff_item.get('t', '')} deg C | "
         f"Wind {waff_item.get('wd', '')} {waff_item.get('ws', '')} km/h | "
         f"Clouds {waff_item.get('tcc', '')}% | "
         f"{waff_item.get('weather_desc_en') or waff_item.get('weather_desc', '')}"
@@ -176,4 +169,65 @@ locations = {
     "Paramba": "72.12.09.2014",
     "Kayupoli": "72.12.08.2019",
     "Kolakolamon": "72.01.09.2037",
-    "Lokait": "72
+    "Lokait": "72.01.17.2012",
+}
+
+rows = []
+for name, adm4 in locations.items():
+    item, err = get_bmkg_current(adm4)
+    if item:
+        rows.append({
+            "Location": name,
+            "Code": adm4,
+            "Local time": item.get("local_datetime", ""),
+            "Temp C": item.get("t", ""),
+            "Humidity %": item.get("hu", ""),
+            "Wind": f"{item.get('wd', '')} {item.get('ws', '')} km/h",
+            "Clouds %": item.get("tcc", ""),
+            "Weather": item.get("weather_desc_en") or item.get("weather_desc", ""),
+        })
+        pdf_texts.append(
+            f"{name} ({adm4}): {item.get('local_datetime', '')} | "
+            f"{item.get('t', '')}C | Wind {item.get('wd', '')} {item.get('ws', '')} km/h | "
+            f"Clouds {item.get('tcc', '')}% | {item.get('weather_desc_en') or item.get('weather_desc', '')}"
+        )
+    else:
+        rows.append({"Location": name, "Code": adm4, "Error": err or "No data"})
+        pdf_texts.append(f"{name} ({adm4}): Error - {err}")
+
+if rows:
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+bmkg_source = "https://api.bmkg.go.id/publik/prakiraan-cuaca"
+st.caption(f"Source: {bmkg_source}")
+pdf_texts.append(f"Source: {bmkg_source}")
+
+# ========== WINDY.COM ==========
+st.header("WINDY.COM")
+windy_embed = "https://embed.windy.com/embed2.html?lat=-1.0&lon=121.0&detailLat=-1.0&detailLon=121.0&width=650&height=450&zoom=6&level=surface&overlay=wind&product=ecmwf&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1"
+st.components.v1.iframe(windy_embed, height=500)
+windy_source = "https://www.windy.com"
+st.caption(f"Source: {windy_source} (low-level winds, central Sulawesi)")
+pdf_texts.append("\n=== WINDY.COM ===")
+pdf_texts.append("Interactive low-level winds (primary wind source)")
+pdf_texts.append(f"Source: {windy_source}")
+
+# ========== PDF BUTTONS ==========
+pdf_bytes = generate_pdf(now, pdf_texts, image_list)
+
+st.download_button(
+    label="Save PDF (Top)",
+    data=pdf_bytes,
+    file_name=f"Yan_Weather_Report_{now.replace(' ', '_').replace(':', '')}.pdf",
+    mime="application/pdf",
+    key="pdf_top"
+)
+
+st.download_button(
+    label="Save PDF (Bottom)",
+    data=pdf_bytes,
+    file_name=f"Yan_Weather_Report_{now.replace(' ', '_').replace(':', '')}.pdf",
+    mime="application/pdf",
+    key="pdf_bottom"
+)
