@@ -7,7 +7,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-# Version 1.6
+# Version 1.7
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -59,9 +59,15 @@ def scrape_waff_bandara():
         soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
         lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-        debug_lines = lines[:100]
+        debug_lines = lines[:120]
 
         result = {}
+
+        # Short weather labels we want (prefer these)
+        short_weather = {
+            "berasap", "cerah", "berawan", "cerah berawan", "cerah - berawan",
+            "udara kabur", "kabut/asap", "hujan ringan", "hujan", "cerah-berawan"
+        }
 
         for i, line in enumerate(lines):
             low = line.lower()
@@ -71,9 +77,13 @@ def scrape_waff_bandara():
                 if "temp" not in result:
                     result["temp"] = re.search(r"(\d+\s*°C)", line).group(1).strip()
 
+            # Weather – prefer short labels near the temperature
+            if line.lower() in short_weather or line in ["Berasap", "Cerah", "Berawan", "Cerah - Berawan"]:
+                if "weather" not in result or len(line) < len(result.get("weather", "")):
+                    result["weather"] = line.strip()
+
             # Visibility
             if "jarak pandang" in low:
-                # value may be on same line or next
                 m = re.search(r"(\d+(?:[.,]\d+)?)\s*km", line, re.I)
                 if m:
                     result["visibility"] = m.group(0).strip()
@@ -92,18 +102,19 @@ def scrape_waff_bandara():
                     if m:
                         result["wind_speed"] = m.group(0).replace(",", ".").strip()
 
-            # Wind direction
+            # Wind direction – full phrases
             if "arah angin" in low:
-                # look for common direction words
-                directions = ["utara", "timur", "selatan", "barat", "timur laut", "tenggara",
-                              "barat daya", "barat laut", "variabel"]
-                for d in directions:
+                full_dirs = [
+                    "barat daya", "barat laut", "timur laut", "tenggara",
+                    "utara", "timur", "selatan", "barat", "variabel"
+                ]
+                for d in full_dirs:
                     if d in low:
                         result["wind_dir"] = d.title()
                         break
                 if "wind_dir" not in result and i + 1 < len(lines):
                     next_low = lines[i+1].lower()
-                    for d in directions:
+                    for d in full_dirs:
                         if d in next_low:
                             result["wind_dir"] = d.title()
                             break
@@ -124,14 +135,6 @@ def scrape_waff_bandara():
                     if m:
                         result["dewpoint"] = m.group(0).strip()
 
-            # Weather
-            weather_words = ["berasap", "cerah", "berawan", "cerah berawan", "cerah - berawan",
-                             "udara kabur", "kabut/asap", "hujan ringan", "hujan"]
-            if line.lower() in weather_words or any(w in low for w in weather_words):
-                if "weather" not in result:
-                    result["weather"] = line.strip()
-
-        # Clean empty strings
         result = {k: v for k, v in result.items() if v}
 
         if result:
@@ -375,7 +378,7 @@ else:
     st.warning(f"Bandara page failed: {waff_err}")
     st.write(waff_text)
     if debug_lines:
-        with st.expander("Raw page lines (first 100) for troubleshooting"):
+        with st.expander("Raw page lines (first 120) for troubleshooting"):
             st.text("\n".join(debug_lines))
 
 st.caption(f"Source: {waff_source}")
