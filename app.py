@@ -5,8 +5,9 @@ from datetime import datetime
 from fpdf import FPDF
 from io import BytesIO
 from bs4 import BeautifulSoup
+import re
 
-# Version 1.4
+# Version 1.5
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -46,38 +47,77 @@ def get_bmkg_current(adm4):
 def scrape_waff_bandara():
     url = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
         resp = requests.get(url, headers=headers, timeout=15)
         if resp.status_code != 200:
-            return None, f"HTTP {resp.status_code}"
+            return None, f"HTTP {resp.status_code}", []
+
         soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
-
-        # Simple extraction of key lines
         lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-        result = {"source": "bandara page"}
+
+        result = {}
+        debug_lines = lines[:80]  # first 80 lines for troubleshooting
+
+        # More precise matching
         for i, line in enumerate(lines):
-            if "Jarak Pandang" in line or "jarak pandang" in line.lower():
-                result["visibility"] = line.split(":")[-1].strip() if ":" in line else line
-            if "°C" in line and any(c.isdigit() for c in line) and "Titik" not in line:
+            low = line.lower()
+
+            # Temperature (look for number + °C, avoid dewpoint)
+            if re.search(r"\d+\s*°C", line) and "titik" not in low and "embun" not in low:
                 if "temp" not in result:
                     result["temp"] = line.strip()
-            if "km/jam" in line or "km/j" in line:
-                result["wind_speed"] = line.strip()
-            if "Arah Angin" in line or "arah angin" in line.lower():
-                result["wind_dir"] = line.split(":")[-1].strip() if ":" in line else line
-            if "hPa" in line:
+
+            # Visibility
+            if "jarak pandang" in low:
+                # take the next non-empty line if current line is only the label
+                if ":" in line:
+                    val = line.split(":", 1)[-1].strip()
+                    if val:
+                        result["visibility"] = val
+                elif i + 1 < len(lines):
+                    result["visibility"] = lines[i + 1].strip()
+
+            # Wind speed
+            if "kecepatan angin" in low or ("km/jam" in low and "angin" in low):
+                if ":" in line:
+                    result["wind_speed"] = line.split(":", 1)[-1].strip()
+                else:
+                    result["wind_speed"] = line.strip()
+
+            # Wind direction
+            if "arah angin" in low:
+                if ":" in line:
+                    result["wind_dir"] = line.split(":", 1)[-1].strip()
+                elif i + 1 < len(lines):
+                    result["wind_dir"] = lines[i + 1].strip()
+
+            # Pressure
+            if "hpa" in low and "tekanan" in low:
                 result["pressure"] = line.strip()
-            if "Titik Embun" in line or "titik embun" in line.lower():
-                result["dewpoint"] = line.split(":")[-1].strip() if ":" in line else line
-            if line in ["Berasap", "Cerah", "Berawan", "Cerah - Berawan", "Udara Kabur", "Kabut/Asap"]:
+
+            # Dew point
+            if "titik embun" in low:
+                if ":" in line:
+                    result["dewpoint"] = line.split(":", 1)[-1].strip()
+                else:
+                    result["dewpoint"] = line.strip()
+
+            # Weather description (common short labels)
+            if line in ["Berasap", "Cerah", "Berawan", "Cerah - Berawan", "Cerah Berawan",
+                        "Udara Kabur", "Kabut/Asap", "Hujan Ringan", "Hujan"]:
                 result["weather"] = line
 
-        if "visibility" in result or "temp" in result:
-            return result, None
-        return None, "Could not parse conditions"
+        if result:
+            return result, None, debug_lines
+        return None, "No key fields parsed", debug_lines
+
     except Exception as e:
-        return None, str(e)
+        return None, str(e), []
 
 # ---------- Helper: Generate PDF (half-page layout) ----------
 def generate_pdf(timestamp, texts, image_urls):
@@ -87,8 +127,6 @@ def generate_pdf(timestamp, texts, image_urls):
 
     # ===== PAGE 1 =====
     pdf.add_page()
-
-    # Top half: title + timestamp + Himawari
     pdf.set_font("Helvetica", size=13)
     pdf.set_xy(12, 12)
     pdf.cell(0, 7, "Yan Weather Report", ln=True, align="C")
@@ -103,7 +141,6 @@ def generate_pdf(timestamp, texts, image_urls):
         pdf.set_xy(20, 40)
         pdf.cell(0, 5, "Himawari IR Enhanced - not available")
 
-    # Bottom half: Citra Sebaran Asap
     try:
         img_resp = requests.get(image_urls[1][1], timeout=15)
         if img_resp.status_code == 200:
@@ -114,8 +151,6 @@ def generate_pdf(timestamp, texts, image_urls):
 
     # ===== PAGE 2 =====
     pdf.add_page()
-
-    # Top half: BMKG Prakiraan Angin
     try:
         img_resp = requests.get(image_urls[2][1], timeout=15)
         if img_resp.status_code == 200:
@@ -124,7 +159,6 @@ def generate_pdf(timestamp, texts, image_urls):
         pdf.set_xy(20, 25)
         pdf.cell(0, 5, "BMKG Prakiraan Angin - not available")
 
-    # Bottom half: text data
     pdf.set_xy(12, 155)
     pdf.set_font("Helvetica", size=8)
     for line in texts:
@@ -181,10 +215,12 @@ except Exception as e:
 
 pdf_texts.append("")
 
-# WAFF - try bandara page first, then fallback
+# WAFF - bandara page first
 pdf_texts.append("WAFF - Mutiara SIS Al-Jufrie (Palu)")
-waff_data, waff_err = scrape_waff_bandara()
+waff_data, waff_err, debug_lines = scrape_waff_bandara()
 waff_text = "Not available"
+waff_source = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
+
 if waff_data:
     parts = []
     if waff_data.get("temp"):
@@ -194,7 +230,7 @@ if waff_data:
     if waff_data.get("visibility"):
         parts.append(f"Vis {waff_data['visibility']}")
     if waff_data.get("wind_speed"):
-        parts.append(waff_data["wind_speed"])
+        parts.append(f"Wind {waff_data['wind_speed']}")
     if waff_data.get("wind_dir"):
         parts.append(waff_data["wind_dir"])
     if waff_data.get("pressure"):
@@ -203,11 +239,10 @@ if waff_data:
         parts.append(f"Dew {waff_data['dewpoint']}")
     waff_text = " | ".join(parts) if parts else "Parsed but empty"
     pdf_texts.append(waff_text)
-    waff_source = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
 else:
-    # Fallback to forecast API
+    # Fallback
     waff_adm4 = "72.71.06.1001"
-    waff_item, waff_lokasi, api_err = get_bmkg_current(waff_adm4)
+    waff_item, _, api_err = get_bmkg_current(waff_adm4)
     if waff_item:
         ws_kmh = waff_item.get("ws") or 0
         ws_kt = round(float(ws_kmh) / 1.852, 1) if ws_kmh else ""
@@ -311,9 +346,17 @@ st.caption(f"Source: {taf_url}")
 
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
 if waff_data:
+    st.success("Bandara page scraped successfully")
     st.write(waff_text)
+    with st.expander("Parsed fields (debug)"):
+        st.json(waff_data)
 else:
-    st.warning(waff_text)
+    st.warning(f"Bandara page failed: {waff_err}")
+    st.write(waff_text)
+    if debug_lines:
+        with st.expander("Raw page lines (first 80) for troubleshooting"):
+            st.text("\n".join(debug_lines))
+
 st.caption(f"Source: {waff_source}")
 
 st.header("SULAWESI TENGAH LOCATIONS")
