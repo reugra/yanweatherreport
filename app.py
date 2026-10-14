@@ -49,14 +49,9 @@ def generate_pdf(timestamp, texts, image_urls):
     pdf.cell(0, 10, "Yan Weather Report", ln=True, align="C")
     pdf.set_font("Helvetica", size=10)
     pdf.cell(0, 8, timestamp, ln=True, align="C")
-    pdf.ln(4)
+    pdf.ln(6)
 
-    pdf.set_font("Helvetica", size=9)
-    for line in texts:
-        safe = line.replace("–", "-").replace("—", "-").replace("°", " deg")
-        pdf.multi_cell(0, 5, safe)
-        pdf.ln(1)
-
+    # Embed the three images in order
     for title, url in image_urls:
         try:
             img_resp = requests.get(url, timeout=15)
@@ -65,40 +60,40 @@ def generate_pdf(timestamp, texts, image_urls):
                 pdf.set_font("Helvetica", size=12)
                 pdf.cell(0, 10, title, ln=True)
                 pdf.image(BytesIO(img_resp.content), x=10, y=30, w=190)
+            else:
+                pdf.add_page()
+                pdf.cell(0, 10, f"{title} - image not available", ln=True)
         except Exception:
             pdf.add_page()
             pdf.cell(0, 10, f"{title} - image not available", ln=True)
+
+    # Text content (WAMM, WAFF, locations)
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=9)
+    for line in texts:
+        safe = line.replace("–", "-").replace("—", "-").replace("°", " deg")
+        pdf.multi_cell(0, 5, safe)
+        pdf.ln(1)
 
     return bytes(pdf.output())
 
 # ---------- Timestamp ----------
 now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-# ---------- Collect ALL data first ----------
-pdf_texts = [f"Yan Weather Report - {now}", ""]
+# ---------- Collect data ----------
+pdf_texts = []
 image_list = []
 
 himawari_url = "https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_EH_Indonesia.png"
 asap_url = "https://inderaja.bmkg.go.id/Trajektori/Asap.png"
+angin_url = "https://dataweb.bmkg.go.id/cuaca/angin/streamline-d10.jpg"
+
 image_list.append(("Himawari IR Enhanced", himawari_url))
 image_list.append(("Citra Sebaran Asap", asap_url))
-pdf_texts.append("\n=== Satellite Images ===")
-pdf_texts.append("Himawari IR Enhanced")
-pdf_texts.append(f"Source: {himawari_url}")
-pdf_texts.append("Citra Sebaran Asap")
-pdf_texts.append(f"Source: {asap_url}")
-
-angin_url = "https://dataweb.bmkg.go.id/cuaca/angin/streamline-d10.jpg"
 image_list.append(("BMKG Prakiraan Angin", angin_url))
-pdf_texts.append("\n=== BMKG Prakiraan Angin ===")
-pdf_texts.append(f"Source: {angin_url}")
 
-windtemp_page = "https://web-aviation.bmkg.go.id/web/windtemp_full.php"
-pdf_texts.append("\n=== BMKG Wind/Temp Chart ===")
-pdf_texts.append(f"Source page: {windtemp_page}")
-pdf_texts.append("(Interactive page; direct image extraction often blocked)")
-
-pdf_texts.append("\n=== WAMM - Sam Ratulangi International Airport (Manado) ===")
+# WAMM
+pdf_texts.append("WAMM - Sam Ratulangi International Airport (Manado)")
 metar_url = "https://aviationweather.gov/api/data/metar?ids=WAMM&format=json"
 try:
     m_resp = requests.get(metar_url, timeout=12)
@@ -109,7 +104,6 @@ try:
             metar_raw = m_data[0].get("rawOb", "Not available")
     pdf_texts.append("METAR:")
     pdf_texts.append(metar_raw)
-    pdf_texts.append(f"Source: {metar_url}")
 except Exception as e:
     metar_raw = f"Error: {e}"
     pdf_texts.append(f"METAR error: {e}")
@@ -124,15 +118,16 @@ try:
             taf_raw = t_data[0].get("rawTAF", "Not available")
     pdf_texts.append("TAF:")
     pdf_texts.append(taf_raw)
-    pdf_texts.append(f"Source: {taf_url}")
 except Exception as e:
     taf_raw = f"Error: {e}"
     pdf_texts.append(f"TAF error: {e}")
 
-pdf_texts.append("\n=== WAFF ===")
+pdf_texts.append("")
+
+# WAFF
+pdf_texts.append("WAFF - Mutiara SIS Al-Jufrie (Palu)")
 waff_adm4 = "72.71.06.1001"
 waff_item, waff_lokasi, waff_err = get_bmkg_current(waff_adm4)
-waff_source = f"https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={waff_adm4}"
 if waff_item:
     ws_kmh = waff_item.get("ws") or 0
     ws_kt = round(float(ws_kmh) / 1.852, 1) if ws_kmh else ""
@@ -149,9 +144,11 @@ if waff_item:
 else:
     waff_text = f"WAFF data not available: {waff_err}"
     pdf_texts.append(waff_text)
-pdf_texts.append(f"Source: {waff_source}")
 
-pdf_texts.append("\n=== SULAWESI TENGAH LOCATIONS ===")
+pdf_texts.append("")
+
+# Sulawesi Tengah locations
+pdf_texts.append("SULAWESI TENGAH LOCATIONS")
 locations = {
     "Watusongu": "72.09.06.2006",
     "Wontowu": "72.09.06.2005",
@@ -196,13 +193,6 @@ for name, adm4 in locations.items():
         })
         pdf_texts.append(f"{name}: Error - {err}")
 
-bmkg_source = "https://api.bmkg.go.id/publik/prakiraan-cuaca"
-pdf_texts.append(f"Source: {bmkg_source}")
-
-pdf_texts.append("\n=== WINDY.COM ===")
-pdf_texts.append("Interactive low-level winds (primary wind source)")
-pdf_texts.append("Source: https://www.windy.com")
-
 pdf_bytes = generate_pdf(now, pdf_texts, image_list)
 
 # ========== PAGE DISPLAY ==========
@@ -229,15 +219,6 @@ st.header("BMKG Prakiraan Angin")
 st.image(angin_url, use_container_width=True)
 st.caption(f"Source: {angin_url}")
 
-st.subheader("BMKG Wind/Temp Chart")
-st.caption("Attempting to load wind chart page (images on this page are often protected or dynamically generated).")
-try:
-    st.components.v1.iframe(windtemp_page, height=600)
-    st.caption(f"Source: {windtemp_page}")
-except Exception:
-    st.warning("Wind data from BMKG aviation page not accessible (embed blocked).")
-
-# WAMM with full name
 st.header("WAMM - Sam Ratulangi International Airport (Manado)")
 st.subheader("METAR")
 st.text(metar_raw)
@@ -251,13 +232,13 @@ if waff_item:
     st.write(waff_text)
 else:
     st.warning(waff_text)
-st.caption(f"Source: {waff_source}")
+st.caption(f"Source: https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={waff_adm4}")
 
 st.header("SULAWESI TENGAH LOCATIONS")
 if rows:
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
-st.caption(f"Source: {bmkg_source}")
+st.caption("Source: https://api.bmkg.go.id/publik/prakiraan-cuaca")
 
 st.header("WINDY.COM")
 windy_embed = "https://embed.windy.com/embed2.html?lat=-1.0&lon=121.0&detailLat=-1.0&detailLon=121.0&width=650&height=450&zoom=6&level=surface&overlay=wind&product=ecmwf&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1"
