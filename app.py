@@ -46,50 +46,52 @@ def generate_pdf(timestamp, texts, image_urls):
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
 
-    # Page 1: Title + timestamp + two satellite images
+    # Page 1: Title + timestamp + two satellite images (aspect ratio preserved)
     pdf.set_font("Helvetica", size=14)
     pdf.cell(0, 8, "Yan Weather Report", ln=True, align="C")
     pdf.set_font("Helvetica", size=10)
     pdf.cell(0, 6, timestamp, ln=True, align="C")
-    pdf.ln(2)
+    pdf.ln(3)
 
-    # Himawari + Asap (stacked, scaled)
-    y_pos = 25
+    y_pos = 28
     for title, url in image_urls[:2]:
         try:
             img_resp = requests.get(url, timeout=15)
             if img_resp.status_code == 200:
-                pdf.image(BytesIO(img_resp.content), x=15, y=y_pos, w=180, h=90)
-                y_pos += 95
+                # Only set width → FPDF preserves aspect ratio
+                pdf.image(BytesIO(img_resp.content), x=20, y=y_pos, w=170)
+                # Approximate height advance (images are wide; adjust if needed)
+                y_pos += 78
             else:
-                pdf.set_xy(15, y_pos)
-                pdf.cell(0, 8, f"{title} - not available", ln=True)
-                y_pos += 10
+                pdf.set_xy(20, y_pos)
+                pdf.cell(0, 6, f"{title} - not available", ln=True)
+                y_pos += 8
         except Exception:
-            pdf.set_xy(15, y_pos)
-            pdf.cell(0, 8, f"{title} - not available", ln=True)
-            y_pos += 10
+            pdf.set_xy(20, y_pos)
+            pdf.cell(0, 6, f"{title} - not available", ln=True)
+            y_pos += 8
 
     # Page 2: Angin image + text data
     pdf.add_page()
     try:
         img_resp = requests.get(image_urls[2][1], timeout=15)
         if img_resp.status_code == 200:
-            pdf.image(BytesIO(img_resp.content), x=15, y=15, w=180, h=100)
+            # Only width set → aspect ratio preserved
+            pdf.image(BytesIO(img_resp.content), x=20, y=12, w=170)
         else:
-            pdf.set_xy(15, 15)
-            pdf.cell(0, 8, "BMKG Prakiraan Angin - not available", ln=True)
+            pdf.set_xy(20, 12)
+            pdf.cell(0, 6, "BMKG Prakiraan Angin - not available", ln=True)
     except Exception:
-        pdf.set_xy(15, 15)
-        pdf.cell(0, 8, "BMKG Prakiraan Angin - not available", ln=True)
+        pdf.set_xy(20, 12)
+        pdf.cell(0, 6, "BMKG Prakiraan Angin - not available", ln=True)
 
-    # Text data starting below the angin image
-    pdf.set_y(120)
+    # Text data starting lower on page 2
+    pdf.set_y(105)
     pdf.set_font("Helvetica", size=9)
     for line in texts:
         safe = line.replace("–", "-").replace("—", "-").replace("°", " deg")
         pdf.multi_cell(0, 4.5, safe)
-        pdf.ln(0.5)
+        pdf.ln(0.4)
 
     return bytes(pdf.output())
 
