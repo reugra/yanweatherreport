@@ -1,5 +1,5 @@
 streamlit
 requests
-fpdf2
 pandas
-Pillow
+fpdf2
+beautifulsoup4
