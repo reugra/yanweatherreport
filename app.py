@@ -1,4 +1,4 @@
-# Version 2.6 – updated YAN locations + WAFW & WAEE airports (same format as WAFF) + Windy rain overlay
+# Version 2.5 – adds RainViewer static radar image for central/north Sulawesi
 import streamlit as st
 import requests
 import pandas as pd
@@ -43,9 +43,9 @@ def get_bmkg_current(adm4):
     except Exception as e:
         return None, None, str(e)
 
-# ---------- Helper: Airport bandara scraper (WAFF / WAFW / WAEE) ----------
-def scrape_bandara(icao):
-    url = f"https://www.bmkg.go.id/cuaca/bandara/{icao}"
+# ---------- Helper: WAFF bandara scraper ----------
+def scrape_waff_bandara():
+    url = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -68,7 +68,7 @@ def scrape_bandara(icao):
         }
         for i, line in enumerate(lines):
             low = line.lower()
-            # datetime
+            # datetime (e.g. 14 Okt 2026 • 11.00 WITA)
             if re.search(r"\d{1,2}\s+[A-Za-z]{3,}\s+\d{4}", line) and ("wita" in low or "wib" in low or "wit" in low):
                 result["datetime"] = line.strip()
             # temperature
@@ -76,7 +76,7 @@ def scrape_bandara(icao):
                 m = re.search(r"(\d+\s*°C)", line)
                 if m:
                     result["temp"] = m.group(1).strip()
-            # short weather
+            # short weather (prefer short labels near temp)
             short_weather = ["berasap", "berawan", "cerah", "hujan", "kabut", "mendung"]
             if any(w in low for w in short_weather) and not result["weather"]:
                 for w in short_weather:
@@ -118,41 +118,27 @@ def scrape_bandara(icao):
     except Exception as e:
         return None, str(e)
 
-def format_airport_text(data):
-    if not data:
-        return None
-    dir_map = {
-        "utara": "N", "timur laut": "NE", "timur": "E", "tenggara": "SE",
-        "selatan": "S", "barat daya": "SW", "barat": "W", "barat laut": "NW",
-        "variable": "VRB"
-    }
-    parts = []
-    if data.get("datetime"):
-        parts.append(data["datetime"].replace("•", " - "))
-    if data.get("temp"):
-        parts.append(data["temp"])
-    if data.get("weather"):
-        parts.append(data["weather"])
-    if data.get("visibility"):
-        parts.append(f"Visibility {data['visibility']}")
-    wind_parts = []
-    if data.get("wind_dir"):
-        abbr = dir_map.get(data["wind_dir"].lower(), data["wind_dir"])
-        wind_parts.append(abbr)
-    if data.get("wind_speed"):
-        try:
-            kmh = float(data["wind_speed"].replace(",", "."))
-            kt = round(kmh / 1.852, 1)
-            wind_parts.append(f"{kt} kt")
-        except Exception:
-            wind_parts.append(data["wind_speed"] + " km/h")
-    if wind_parts:
-        parts.append("Wind " + " ".join(wind_parts))
-    if data.get("pressure"):
-        parts.append(data["pressure"])
-    if data.get("dewpoint"):
-        parts.append(f"Dewpoint {data['dewpoint']}")
-    return " | ".join(parts)
+# ---------- Helper: RainViewer radar ----------
+def get_rainviewer_radar_url(lat=-1.0, lon=121.0, zoom=5, size=512):
+    try:
+        api_url = "https://api.rainviewer.com/public/weather-maps.json"
+        resp = requests.get(api_url, timeout=12)
+        if resp.status_code != 200:
+            return None, f"API HTTP {resp.status_code}"
+        data = resp.json()
+        host = data.get("host", "https://tilecache.rainviewer.com")
+        past = data.get("radar", {}).get("past", [])
+        if not past:
+            return None, "No radar frames available"
+        latest = past[-1]
+        path = latest.get("path")
+        if not path:
+            return None, "No path in latest frame"
+        # color=2 is Universal Blue; options=1_1 is common
+        img_url = f"{host}{path}/{size}/{zoom}/{lat}/{lon}/2/1_1.png"
+        return img_url, None
+    except Exception as e:
+        return None, str(e)
 
 # ---------- Helper: Generate PDF ----------
 def generate_pdf(timestamp, texts, image_urls):
@@ -165,7 +151,7 @@ def generate_pdf(timestamp, texts, image_urls):
     pdf.cell(0, 6, timestamp, ln=True, align="C")
     pdf.ln(4)
 
-    # Page 1: Himawari + Asap
+    # Page 1 images (Himawari + Asap)
     y_start = 30
     for i, (label, url) in enumerate(image_urls[:2]):
         try:
@@ -177,12 +163,14 @@ def generate_pdf(timestamp, texts, image_urls):
             pass
     pdf.add_page()
 
-    # Page 2: Angin + text
+    # Page 2: Angin + radar (if present) + text
     angin_url = None
+    radar_url = None
     for label, url in image_urls:
         if "angin" in label.lower() or "prakiraan" in label.lower():
             angin_url = url
-            break
+        if "radar" in label.lower() or "rainviewer" in label.lower():
+            radar_url = url
 
     y = 15
     if angin_url:
@@ -192,6 +180,16 @@ def generate_pdf(timestamp, texts, image_urls):
                 img_bytes = BytesIO(img_resp.content)
                 pdf.image(img_bytes, x=25, y=y, w=160)
                 y = 100
+        except Exception:
+            pass
+
+    if radar_url:
+        try:
+            img_resp = requests.get(radar_url, timeout=15)
+            if img_resp.status_code == 200:
+                img_bytes = BytesIO(img_resp.content)
+                pdf.image(img_bytes, x=25, y=y, w=160)
+                y += 90
         except Exception:
             pass
 
@@ -209,7 +207,7 @@ now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
 st.download_button(
     label="Save PDF",
-    data=b"",
+    data=b"",  # placeholder, filled later
     file_name=f"Yan_Weather_Report_{now.replace(' ', '_').replace(':', '')}.pdf",
     mime="application/pdf",
     key="pdf_top"
@@ -235,6 +233,15 @@ st.header("BMKG Prakiraan Angin")
 st.image(angin_url, use_container_width=True)
 st.caption(f"Source: {angin_url}")
 
+# ---------- RainViewer Radar ----------
+st.header("Radar – Central & North Sulawesi (RainViewer)")
+radar_url, radar_err = get_rainviewer_radar_url(lat=-1.0, lon=121.0, zoom=5, size=512)
+if radar_url:
+    st.image(radar_url, use_container_width=True)
+    st.caption(f"Source: RainViewer (BMKG data) – {radar_url}")
+else:
+    st.warning(f"RainViewer radar not available: {radar_err}")
+
 # WAMM
 st.header("WAMM - Sam Ratulangi International Airport (Manado)")
 metar_url = "https://aviationweather.gov/api/data/metar?ids=WAMM&format=json"
@@ -259,33 +266,44 @@ st.caption(f"Source: {taf_url}")
 
 # WAFF
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
-waff_data, waff_err = scrape_bandara("WAFF")
-waff_text = format_airport_text(waff_data)
-if waff_text:
+waff_data, waff_err = scrape_waff_bandara()
+dir_map = {
+    "utara": "N", "timur laut": "NE", "timur": "E", "tenggara": "SE",
+    "selatan": "S", "barat daya": "SW", "barat": "W", "barat laut": "NW",
+    "variable": "VRB"
+}
+if waff_data:
+    parts = []
+    if waff_data.get("datetime"):
+        parts.append(waff_data["datetime"].replace("•", " - "))
+    if waff_data.get("temp"):
+        parts.append(waff_data["temp"])
+    if waff_data.get("weather"):
+        parts.append(waff_data["weather"])
+    if waff_data.get("visibility"):
+        parts.append(f"Visibility {waff_data['visibility']}")
+    wind_parts = []
+    if waff_data.get("wind_dir"):
+        abbr = dir_map.get(waff_data["wind_dir"].lower(), waff_data["wind_dir"])
+        wind_parts.append(abbr)
+    if waff_data.get("wind_speed"):
+        try:
+            kmh = float(waff_data["wind_speed"].replace(",", "."))
+            kt = round(kmh / 1.852, 1)
+            wind_parts.append(f"{kt} kt")
+        except Exception:
+            wind_parts.append(waff_data["wind_speed"] + " km/h")
+    if wind_parts:
+        parts.append("Wind " + " ".join(wind_parts))
+    if waff_data.get("pressure"):
+        parts.append(waff_data["pressure"])
+    if waff_data.get("dewpoint"):
+        parts.append(f"Dewpoint {waff_data['dewpoint']}")
+    waff_text = " | ".join(parts)
     st.write(waff_text)
 else:
     st.warning(f"WAFF data not available: {waff_err}")
 st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAFF")
-
-# WAFW
-st.header("WAFW - Syukuran Aminuddin Amir Airport (Luwuk)")
-wafw_data, wafw_err = scrape_bandara("WAFW")
-wafw_text = format_airport_text(wafw_data)
-if wafw_text:
-    st.write(wafw_text)
-else:
-    st.warning(f"WAFW data not available: {wafw_err}")
-st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAFW")
-
-# WAEE
-st.header("WAEE - Sultan Babullah Airport (Ternate)")
-waee_data, waee_err = scrape_bandara("WAEE")
-waee_text = format_airport_text(waee_data)
-if waee_text:
-    st.write(waee_text)
-else:
-    st.warning(f"WAEE data not available: {waee_err}")
-st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAEE")
 
 # YAN Locations
 st.header("YAN LOCATIONS")
@@ -330,29 +348,30 @@ if rows:
     st.dataframe(df, use_container_width=True, hide_index=True)
 st.caption("Source: https://api.bmkg.go.id/publik/prakiraan-cuaca")
 
-# Windy – Rain, thunder
+# Windy
 st.header("WINDY.COM")
 windy_embed = "https://embed.windy.com/embed2.html?lat=-1.0&lon=121.0&detailLat=-1.0&detailLon=121.0&width=650&height=450&zoom=6&level=surface&overlay=rain&product=ecmwf&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1"
 st.components.v1.iframe(windy_embed, height=500)
-st.caption("Source: https://www.windy.com (Rain, thunder – central Sulawesi)")
+st.caption("Source: https://www.windy.com (low-level winds, central Sulawesi)")
 
 # ---------- PDF generation ----------
 pdf_texts = []
 pdf_texts.append(f"WAMM METAR: {metar_raw}")
 pdf_texts.append(f"WAMM TAF: {taf_raw}")
-pdf_texts.append(f"WAFF: {waff_text if waff_text else 'Not available'}")
-pdf_texts.append(f"WAFW: {wafw_text if wafw_text else 'Not available'}")
-pdf_texts.append(f"WAEE: {waee_text if waee_text else 'Not available'}")
-pdf_texts.append("YAN LOCATIONS:\n" + (df.to_string(index=False) if 'df' in locals() else "No location data"))
+pdf_texts.append(f"WAFF: {waff_text if 'waff_text' in locals() else 'Not available'}")
+pdf_texts.append("YAN LOCATIONS:\n" + df.to_string(index=False) if 'df' in locals() else "No location data")
 
 image_list = [
     ("Himawari IR Enhanced", himawari_url),
     ("Citra Sebaran Asap", asap_url),
     ("BMKG Prakiraan Angin", angin_url),
 ]
+if radar_url:
+    image_list.append(("RainViewer Radar", radar_url))
 
 pdf_bytes = generate_pdf(now, pdf_texts, image_list)
 
+# Update both download buttons
 st.download_button(
     label="Save PDF",
     data=pdf_bytes,
@@ -360,3 +379,7 @@ st.download_button(
     mime="application/pdf",
     key="pdf_bottom"
 )
+
+# Top button needs to be re-rendered with data – Streamlit limitation workaround:
+# The top button is placed early; we re-create it at the end with the real data if needed.
+# For simplicity the bottom button is the reliable one; you can move the top one after PDF generation if preferred.
