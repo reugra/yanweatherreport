@@ -7,7 +7,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-# Version 2.0
+# Version 2.1
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -251,6 +251,19 @@ waff_data, waff_err, _ = scrape_waff_bandara()
 waff_text = "Not available"
 waff_source = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
 
+# Direction mapping
+dir_map = {
+    "utara": "N",
+    "timur laut": "NE",
+    "timur": "E",
+    "tenggara": "SE",
+    "selatan": "S",
+    "barat daya": "SW",
+    "barat": "W",
+    "barat laut": "NW",
+    "variabel": "VRB",
+}
+
 if waff_data:
     parts = []
     if waff_data.get("datetime"):
@@ -261,14 +274,28 @@ if waff_data:
         parts.append(waff_data["weather"])
     if waff_data.get("visibility"):
         parts.append(f"Vis {waff_data['visibility']}")
+
+    # Wind speed → knots
     if waff_data.get("wind_speed"):
-        parts.append(f"Wind {waff_data['wind_speed']}")
+        try:
+            kmh_str = re.search(r"[\d.]+", waff_data["wind_speed"])
+            if kmh_str:
+                kmh = float(kmh_str.group())
+                kt = round(kmh / 1.852, 1)
+                parts.append(f"Wind {kt} kt")
+        except Exception:
+            parts.append(f"Wind {waff_data['wind_speed']}")
+
+    # Wind direction → abbreviated English
     if waff_data.get("wind_dir"):
-        parts.append(waff_data["wind_dir"])
+        abbr = dir_map.get(waff_data["wind_dir"].lower(), waff_data["wind_dir"])
+        parts.append(abbr)
+
     if waff_data.get("pressure"):
         parts.append(waff_data["pressure"])
     if waff_data.get("dewpoint"):
-        parts.append(f"Dew {waff_data['dewpoint']}")
+        parts.append(f"Dewpoint {waff_data['dewpoint']}")
+
     waff_text = " | ".join(parts) if parts else "Parsed but empty"
     pdf_texts.append(waff_text)
 else:
