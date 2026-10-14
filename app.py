@@ -7,6 +7,22 @@ from io import BytesIO
 
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
+# ---------- Red button style ----------
+st.markdown("""
+<style>
+div.stDownloadButton > button {
+    background-color: #e74c3c !important;
+    color: white !important;
+    border: none !important;
+    font-weight: bold;
+}
+div.stDownloadButton > button:hover {
+    background-color: #c0392b !important;
+    color: white !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ---------- Helper: BMKG forecast extractor ----------
 def get_bmkg_current(adm4):
     try:
@@ -58,11 +74,10 @@ def generate_pdf(timestamp, texts, image_urls):
 # ---------- Timestamp ----------
 now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-# ---------- Collect ALL data first (so PDF can be made early) ----------
+# ---------- Collect ALL data first ----------
 pdf_texts = [f"Yan Weather Report - {now}", ""]
 image_list = []
 
-# Satellite
 himawari_url = "https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_EH_Indonesia.png"
 asap_url = "https://inderaja.bmkg.go.id/Trajektori/Asap.png"
 image_list.append(("Himawari IR Enhanced", himawari_url))
@@ -73,14 +88,17 @@ pdf_texts.append(f"Source: {himawari_url}")
 pdf_texts.append("Citra Sebaran Asap")
 pdf_texts.append(f"Source: {asap_url}")
 
-# Angin
 angin_url = "https://dataweb.bmkg.go.id/cuaca/angin/streamline-d10.jpg"
 image_list.append(("BMKG Prakiraan Angin", angin_url))
 pdf_texts.append("\n=== BMKG Prakiraan Angin ===")
 pdf_texts.append(f"Source: {angin_url}")
 
-# WAMM METAR / TAF
-pdf_texts.append("\n=== WAMM ===")
+windtemp_page = "https://web-aviation.bmkg.go.id/web/windtemp_full.php"
+pdf_texts.append("\n=== BMKG Wind/Temp Chart ===")
+pdf_texts.append(f"Source page: {windtemp_page}")
+pdf_texts.append("(Interactive page; direct image extraction often blocked)")
+
+pdf_texts.append("\n=== WAMM - Sam Ratulangi International Airport (Manado) ===")
 metar_url = "https://aviationweather.gov/api/data/metar?ids=WAMM&format=json"
 try:
     m_resp = requests.get(metar_url, timeout=12)
@@ -111,7 +129,6 @@ except Exception as e:
     taf_raw = f"Error: {e}"
     pdf_texts.append(f"TAF error: {e}")
 
-# WAFF
 pdf_texts.append("\n=== WAFF ===")
 waff_adm4 = "72.71.06.1001"
 waff_item, waff_lokasi, waff_err = get_bmkg_current(waff_adm4)
@@ -134,7 +151,6 @@ else:
     pdf_texts.append(waff_text)
 pdf_texts.append(f"Source: {waff_source}")
 
-# Sulawesi Tengah locations
 pdf_texts.append("\n=== SULAWESI TENGAH LOCATIONS ===")
 locations = {
     "Watusongu": "72.09.06.2006",
@@ -183,18 +199,13 @@ for name, adm4 in locations.items():
 bmkg_source = "https://api.bmkg.go.id/publik/prakiraan-cuaca"
 pdf_texts.append(f"Source: {bmkg_source}")
 
-# Windy
 pdf_texts.append("\n=== WINDY.COM ===")
 pdf_texts.append("Interactive low-level winds (primary wind source)")
 pdf_texts.append("Source: https://www.windy.com")
 
-# Generate PDF once
 pdf_bytes = generate_pdf(now, pdf_texts, image_list)
 
 # ========== PAGE DISPLAY ==========
-st.header(f"Timestamp: {now}")
-
-# TOP PDF BUTTON
 st.download_button(
     label="Save PDF",
     data=pdf_bytes,
@@ -203,7 +214,8 @@ st.download_button(
     key="pdf_top"
 )
 
-# Satellite images
+st.header(f"Timestamp: {now}")
+
 st.header("Satellite Images")
 st.subheader("Himawari IR Enhanced")
 st.image(himawari_url, use_container_width=True)
@@ -213,13 +225,20 @@ st.subheader("Citra Sebaran Asap")
 st.image(asap_url, use_container_width=True)
 st.caption(f"Source: {asap_url}")
 
-# Angin
 st.header("BMKG Prakiraan Angin")
 st.image(angin_url, use_container_width=True)
 st.caption(f"Source: {angin_url}")
 
-# WAMM
-st.header("WAMM")
+st.subheader("BMKG Wind/Temp Chart")
+st.caption("Attempting to load wind chart page (images on this page are often protected or dynamically generated).")
+try:
+    st.components.v1.iframe(windtemp_page, height=600)
+    st.caption(f"Source: {windtemp_page}")
+except Exception:
+    st.warning("Wind data from BMKG aviation page not accessible (embed blocked).")
+
+# WAMM with full name
+st.header("WAMM - Sam Ratulangi International Airport (Manado)")
 st.subheader("METAR")
 st.text(metar_raw)
 st.caption(f"Source: {metar_url}")
@@ -227,7 +246,6 @@ st.subheader("TAF")
 st.text(taf_raw)
 st.caption(f"Source: {taf_url}")
 
-# WAFF
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
 if waff_item:
     st.write(waff_text)
@@ -235,20 +253,17 @@ else:
     st.warning(waff_text)
 st.caption(f"Source: {waff_source}")
 
-# Sulawesi Tengah
 st.header("SULAWESI TENGAH LOCATIONS")
 if rows:
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
 st.caption(f"Source: {bmkg_source}")
 
-# Windy
 st.header("WINDY.COM")
 windy_embed = "https://embed.windy.com/embed2.html?lat=-1.0&lon=121.0&detailLat=-1.0&detailLon=121.0&width=650&height=450&zoom=6&level=surface&overlay=wind&product=ecmwf&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1"
 st.components.v1.iframe(windy_embed, height=500)
 st.caption("Source: https://www.windy.com (low-level winds, central Sulawesi)")
 
-# BOTTOM PDF BUTTON
 st.download_button(
     label="Save PDF",
     data=pdf_bytes,
