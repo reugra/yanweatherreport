@@ -1,4 +1,3 @@
-# Version 2.5 – adds RainViewer static radar image for central/north Sulawesi
 import streamlit as st
 import requests
 import pandas as pd
@@ -8,6 +7,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
+# Version 2.4
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -43,270 +43,286 @@ def get_bmkg_current(adm4):
     except Exception as e:
         return None, None, str(e)
 
-# ---------- Helper: WAFF bandara scraper ----------
+# ---------- Helper: Scrape WAFF current conditions from bandara page ----------
 def scrape_waff_bandara():
     url = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "id-ID,id;q=0.9,en;q=0.8",
         }
         resp = requests.get(url, headers=headers, timeout=15)
         if resp.status_code != 200:
-            return None, f"HTTP {resp.status_code}"
+            return None, f"HTTP {resp.status_code}", []
+
         soup = BeautifulSoup(resp.text, "html.parser")
-        text = soup.get_text("\n", strip=True)
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        result = {
-            "datetime": "",
-            "temp": "",
-            "weather": "",
-            "visibility": "",
-            "wind_speed": "",
-            "wind_dir": "",
-            "pressure": "",
-            "dewpoint": "",
+        text = soup.get_text(separator="\n", strip=True)
+        lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+
+        result = {}
+
+        short_weather = {
+            "berasap", "cerah", "berawan", "cerah berawan", "cerah - berawan",
+            "udara kabur", "kabut/asap", "hujan ringan", "hujan", "cerah-berawan"
         }
+
         for i, line in enumerate(lines):
             low = line.lower()
-            # datetime (e.g. 14 Okt 2026 • 11.00 WITA)
-            if re.search(r"\d{1,2}\s+[A-Za-z]{3,}\s+\d{4}", line) and ("wita" in low or "wib" in low or "wit" in low):
-                result["datetime"] = line.strip()
-            # temperature
-            if re.search(r"\d+\s*°C", line) and "titik" not in low and "embun" not in low and not result["temp"]:
-                m = re.search(r"(\d+\s*°C)", line)
-                if m:
-                    result["temp"] = m.group(1).strip()
-            # short weather (prefer short labels near temp)
-            short_weather = ["berasap", "berawan", "cerah", "hujan", "kabut", "mendung"]
-            if any(w in low for w in short_weather) and not result["weather"]:
-                for w in short_weather:
-                    if w in low:
-                        result["weather"] = w.title()
-                        break
-            # visibility
-            if "jarak pandang" in low or "visibility" in low:
+
+            if re.search(r"\d{1,2}\s+[A-Za-z]+\s+\d{4}", line) and ("wita" in low or "wib" in low or "wit" in low or "•" in line):
+                if "datetime" not in result:
+                    result["datetime"] = line.strip()
+
+            if re.search(r"\d+\s*°C", line) and "titik" not in low and "embun" not in low:
+                if "temp" not in result:
+                    result["temp"] = re.search(r"(\d+\s*°C)", line).group(1).strip()
+
+            if line.lower() in short_weather or line in ["Berasap", "Cerah", "Berawan", "Cerah - Berawan"]:
+                if "weather" not in result or len(line) < len(result.get("weather", "")):
+                    result["weather"] = line.strip()
+
+            if "jarak pandang" in low:
                 m = re.search(r"(\d+(?:[.,]\d+)?)\s*km", line, re.I)
                 if m:
-                    result["visibility"] = m.group(1).replace(",", ".") + " km"
-            # wind speed (handles both 7,4 and 13)
+                    result["visibility"] = m.group(0).strip()
+                elif i + 1 < len(lines):
+                    m = re.search(r"(\d+(?:[.,]\d+)?)\s*km", lines[i+1], re.I)
+                    if m:
+                        result["visibility"] = m.group(0).strip()
+
             if "kecepatan angin" in low or re.search(r"\d+(?:[.,]\d+)?\s*km/jam", low):
                 m = re.search(r"(\d+(?:[.,]\d+)?)\s*km/jam", line, re.I)
                 if m:
-                    result["wind_speed"] = m.group(1).replace(",", ".")
-            # wind direction
+                    result["wind_speed"] = m.group(0).replace(",", ".").strip()
+                elif i + 1 < len(lines):
+                    m = re.search(r"(\d+(?:[.,]\d+)?)\s*km/jam", lines[i+1], re.I)
+                    if m:
+                        result["wind_speed"] = m.group(0).replace(",", ".").strip()
+
             if "arah angin" in low:
                 full_dirs = [
-                    "utara", "timur laut", "timur", "tenggara", "selatan",
-                    "barat daya", "barat", "barat laut", "variable"
+                    "barat daya", "barat laut", "timur laut", "tenggara",
+                    "utara", "timur", "selatan", "barat", "variabel"
                 ]
                 for d in full_dirs:
                     if d in low:
                         result["wind_dir"] = d.title()
                         break
-            # pressure
+                if "wind_dir" not in result and i + 1 < len(lines):
+                    next_low = lines[i+1].lower()
+                    for d in full_dirs:
+                        if d in next_low:
+                            result["wind_dir"] = d.title()
+                            break
+
             if "tekanan" in low or "hpa" in low:
                 m = re.search(r"(\d+[.,]\d+)\s*hpa", line, re.I)
                 if m:
-                    result["pressure"] = m.group(1).replace(",", ".") + " hPa"
-            # dewpoint
-            if "titik embun" in low or "dew" in low:
-                m = re.search(r"(\d+\s*°C)", line)
+                    result["pressure"] = m.group(0).replace(",", ".").strip()
+
+            if "titik embun" in low:
+                m = re.search(r"(\d+)\s*°C", line)
                 if m:
-                    result["dewpoint"] = m.group(1).strip()
+                    result["dewpoint"] = m.group(0).strip()
+                elif i + 1 < len(lines):
+                    m = re.search(r"(\d+)\s*°C", lines[i+1])
+                    if m:
+                        result["dewpoint"] = m.group(0).strip()
+
         result = {k: v for k, v in result.items() if v}
-        return result, None
-    except Exception as e:
-        return None, str(e)
 
-# ---------- Helper: RainViewer radar ----------
-def get_rainviewer_radar_url(lat=-1.0, lon=121.0, zoom=5, size=512):
-    try:
-        api_url = "https://api.rainviewer.com/public/weather-maps.json"
-        resp = requests.get(api_url, timeout=12)
-        if resp.status_code != 200:
-            return None, f"API HTTP {resp.status_code}"
-        data = resp.json()
-        host = data.get("host", "https://tilecache.rainviewer.com")
-        past = data.get("radar", {}).get("past", [])
-        if not past:
-            return None, "No radar frames available"
-        latest = past[-1]
-        path = latest.get("path")
-        if not path:
-            return None, "No path in latest frame"
-        # color=2 is Universal Blue; options=1_1 is common
-        img_url = f"{host}{path}/{size}/{zoom}/{lat}/{lon}/2/1_1.png"
-        return img_url, None
-    except Exception as e:
-        return None, str(e)
+        if result:
+            return result, None, []
+        return None, "No key fields parsed", []
 
-# ---------- Helper: Generate PDF ----------
+    except Exception as e:
+        return None, str(e), []
+
+# ---------- Helper: Generate PDF (half-page layout) ----------
 def generate_pdf(timestamp, texts, image_urls):
     pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(auto=False)
+    pdf.set_margins(12, 12, 12)
+
+    # ===== PAGE 1 =====
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 10, "Yan Weather Report", ln=True, align="C")
-    pdf.set_font("Helvetica", size=10)
-    pdf.cell(0, 6, timestamp, ln=True, align="C")
-    pdf.ln(4)
-
-    # Page 1 images (Himawari + Asap)
-    y_start = 30
-    for i, (label, url) in enumerate(image_urls[:2]):
-        try:
-            img_resp = requests.get(url, timeout=15)
-            if img_resp.status_code == 200:
-                img_bytes = BytesIO(img_resp.content)
-                pdf.image(img_bytes, x=25, y=y_start + i * 90, w=160)
-        except Exception:
-            pass
-    pdf.add_page()
-
-    # Page 2: Angin + radar (if present) + text
-    angin_url = None
-    radar_url = None
-    for label, url in image_urls:
-        if "angin" in label.lower() or "prakiraan" in label.lower():
-            angin_url = url
-        if "radar" in label.lower() or "rainviewer" in label.lower():
-            radar_url = url
-
-    y = 15
-    if angin_url:
-        try:
-            img_resp = requests.get(angin_url, timeout=15)
-            if img_resp.status_code == 200:
-                img_bytes = BytesIO(img_resp.content)
-                pdf.image(img_bytes, x=25, y=y, w=160)
-                y = 100
-        except Exception:
-            pass
-
-    if radar_url:
-        try:
-            img_resp = requests.get(radar_url, timeout=15)
-            if img_resp.status_code == 200:
-                img_bytes = BytesIO(img_resp.content)
-                pdf.image(img_bytes, x=25, y=y, w=160)
-                y += 90
-        except Exception:
-            pass
-
-    pdf.set_xy(15, y + 5)
+    pdf.set_font("Helvetica", size=13)
+    pdf.set_xy(12, 12)
+    pdf.cell(0, 7, "Yan Weather Report", ln=True, align="C")
     pdf.set_font("Helvetica", size=9)
-    for block in texts:
-        safe = block.replace("•", " - ").encode("ascii", "ignore").decode("ascii")
-        pdf.multi_cell(0, 4, safe)
-        pdf.ln(2)
+    pdf.cell(0, 5, timestamp, ln=True, align="C")
+
+    try:
+        img_resp = requests.get(image_urls[0][1], timeout=15)
+        if img_resp.status_code == 200:
+            pdf.image(BytesIO(img_resp.content), x=20, y=30, w=160)
+    except Exception:
+        pdf.set_xy(20, 40)
+        pdf.cell(0, 5, "Himawari IR Enhanced - not available")
+
+    try:
+        img_resp = requests.get(image_urls[1][1], timeout=15)
+        if img_resp.status_code == 200:
+            pdf.image(BytesIO(img_resp.content), x=20, y=155, w=160)
+    except Exception:
+        pdf.set_xy(20, 165)
+        pdf.cell(0, 5, "Citra Sebaran Asap - not available")
+
+    # ===== PAGE 2 =====
+    pdf.add_page()
+    try:
+        img_resp = requests.get(image_urls[2][1], timeout=15)
+        if img_resp.status_code == 200:
+            pdf.image(BytesIO(img_resp.content), x=20, y=15, w=160)
+    except Exception:
+        pdf.set_xy(20, 25)
+        pdf.cell(0, 5, "BMKG Prakiraan Angin - not available")
+
+    pdf.set_xy(12, 155)
+    pdf.set_font("Helvetica", size=8)
+    for line in texts:
+        safe = (line
+                .replace("–", "-")
+                .replace("—", "-")
+                .replace("°", " deg")
+                .replace("•", " - ")
+                .encode("ascii", "ignore")
+                .decode("ascii"))
+        try:
+            pdf.multi_cell(0, 4, safe)
+            pdf.ln(0.3)
+        except Exception:
+            pdf.multi_cell(0, 4, "[text encoding error]")
+            pdf.ln(0.3)
 
     return bytes(pdf.output())
 
-# ---------- Main UI ----------
+# ---------- Timestamp ----------
 now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-st.download_button(
-    label="Save PDF",
-    data=b"",  # placeholder, filled later
-    file_name=f"Yan_Weather_Report_{now.replace(' ', '_').replace(':', '')}.pdf",
-    mime="application/pdf",
-    key="pdf_top"
-)
+# ---------- Collect data ----------
+pdf_texts = []
+image_list = []
 
-st.caption(f"**Timestamp:** {now}")
-
-# Satellite images
-st.header("Satellite Images")
 himawari_url = "https://inderaja.bmkg.go.id/IMAGE/HIMA/H08_EH_Indonesia.png"
 asap_url = "https://inderaja.bmkg.go.id/Trajektori/Asap.png"
 angin_url = "https://dataweb.bmkg.go.id/cuaca/angin/streamline-d10.jpg"
 
-col1, col2 = st.columns(2)
-with col1:
-    st.image(himawari_url, use_container_width=True)
-    st.caption(f"Source: {himawari_url}")
-with col2:
-    st.image(asap_url, use_container_width=True)
-    st.caption(f"Source: {asap_url}")
-
-st.header("BMKG Prakiraan Angin")
-st.image(angin_url, use_container_width=True)
-st.caption(f"Source: {angin_url}")
-
-# ---------- RainViewer Radar ----------
-st.header("Radar – Central & North Sulawesi (RainViewer)")
-radar_url, radar_err = get_rainviewer_radar_url(lat=-1.0, lon=121.0, zoom=5, size=512)
-if radar_url:
-    st.image(radar_url, use_container_width=True)
-    st.caption(f"Source: RainViewer (BMKG data) – {radar_url}")
-else:
-    st.warning(f"RainViewer radar not available: {radar_err}")
+image_list.append(("Himawari IR Enhanced", himawari_url))
+image_list.append(("Citra Sebaran Asap", asap_url))
+image_list.append(("BMKG Prakiraan Angin", angin_url))
 
 # WAMM
-st.header("WAMM - Sam Ratulangi International Airport (Manado)")
+pdf_texts.append("WAMM - Sam Ratulangi International Airport (Manado)")
 metar_url = "https://aviationweather.gov/api/data/metar?ids=WAMM&format=json"
+try:
+    m_resp = requests.get(metar_url, timeout=12)
+    metar_raw = "Not available"
+    if m_resp.status_code == 200:
+        m_data = m_resp.json()
+        if m_data and isinstance(m_data, list) and len(m_data) > 0:
+            metar_raw = m_data[0].get("rawOb", "Not available")
+    pdf_texts.append("METAR:")
+    pdf_texts.append(metar_raw)
+except Exception as e:
+    metar_raw = f"Error: {e}"
+    pdf_texts.append(f"METAR error: {e}")
+
 taf_url = "https://aviationweather.gov/api/data/taf?ids=WAMM&format=json"
 try:
-    metar_resp = requests.get(metar_url, timeout=10)
-    metar_raw = metar_resp.json()[0].get("rawOb", "Not available") if metar_resp.status_code == 200 else "Not available"
-except Exception:
-    metar_raw = "Not available"
-try:
-    taf_resp = requests.get(taf_url, timeout=10)
-    taf_raw = taf_resp.json()[0].get("rawTAF", "Not available") if taf_resp.status_code == 200 else "Not available"
-except Exception:
+    t_resp = requests.get(taf_url, timeout=12)
     taf_raw = "Not available"
+    if t_resp.status_code == 200:
+        t_data = t_resp.json()
+        if t_data and isinstance(t_data, list) and len(t_data) > 0:
+            taf_raw = t_data[0].get("rawTAF", "Not available")
+    pdf_texts.append("TAF:")
+    pdf_texts.append(taf_raw)
+except Exception as e:
+    taf_raw = f"Error: {e}"
+    pdf_texts.append(f"TAF error: {e}")
 
-st.subheader("METAR")
-st.text(metar_raw)
-st.caption(f"Source: {metar_url}")
-st.subheader("TAF")
-st.text(taf_raw)
-st.caption(f"Source: {taf_url}")
+pdf_texts.append("")
 
 # WAFF
-st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
-waff_data, waff_err = scrape_waff_bandara()
+pdf_texts.append("WAFF - Mutiara SIS Al-Jufrie (Palu)")
+waff_data, waff_err, _ = scrape_waff_bandara()
+waff_text = "Not available"
+waff_source = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
+
 dir_map = {
-    "utara": "N", "timur laut": "NE", "timur": "E", "tenggara": "SE",
-    "selatan": "S", "barat daya": "SW", "barat": "W", "barat laut": "NW",
-    "variable": "VRB"
+    "utara": "N",
+    "timur laut": "NE",
+    "timur": "E",
+    "tenggara": "SE",
+    "selatan": "S",
+    "barat daya": "SW",
+    "barat": "W",
+    "barat laut": "NW",
+    "variabel": "VRB",
 }
+
 if waff_data:
     parts = []
     if waff_data.get("datetime"):
-        parts.append(waff_data["datetime"].replace("•", " - "))
+        parts.append(waff_data["datetime"])
     if waff_data.get("temp"):
         parts.append(waff_data["temp"])
     if waff_data.get("weather"):
         parts.append(waff_data["weather"])
     if waff_data.get("visibility"):
         parts.append(f"Visibility {waff_data['visibility']}")
+
     wind_parts = []
     if waff_data.get("wind_dir"):
         abbr = dir_map.get(waff_data["wind_dir"].lower(), waff_data["wind_dir"])
         wind_parts.append(abbr)
     if waff_data.get("wind_speed"):
         try:
-            kmh = float(waff_data["wind_speed"].replace(",", "."))
-            kt = round(kmh / 1.852, 1)
-            wind_parts.append(f"{kt} kt")
+            kmh_str = re.search(r"[\d.]+", waff_data["wind_speed"])
+            if kmh_str:
+                kmh = float(kmh_str.group())
+                kt = round(kmh / 1.852, 1)
+                wind_parts.append(f"{kt} kt")
         except Exception:
-            wind_parts.append(waff_data["wind_speed"] + " km/h")
+            wind_parts.append(waff_data["wind_speed"])
     if wind_parts:
         parts.append("Wind " + " ".join(wind_parts))
+
     if waff_data.get("pressure"):
         parts.append(waff_data["pressure"])
     if waff_data.get("dewpoint"):
         parts.append(f"Dewpoint {waff_data['dewpoint']}")
-    waff_text = " | ".join(parts)
-    st.write(waff_text)
+
+    waff_text = " | ".join(parts) if parts else "Parsed but empty"
+    pdf_texts.append(waff_text)
 else:
-    st.warning(f"WAFF data not available: {waff_err}")
-st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAFF")
+    waff_adm4 = "72.71.06.1001"
+    waff_item, _, api_err = get_bmkg_current(waff_adm4)
+    if waff_item:
+        ws_kmh = waff_item.get("ws") or 0
+        ws_kt = round(float(ws_kmh) / 1.852, 1) if ws_kmh else ""
+        vis = waff_item.get("vs_text") or waff_item.get("vs") or "N/A"
+        waff_text = (
+            f"{waff_item.get('utc_datetime', '')} UTC | "
+            f"{waff_item.get('t', '')} deg C | "
+            f"Wind {waff_item.get('wd', '')} {ws_kt} kt | "
+            f"Clouds {waff_item.get('tcc', '')}% | "
+            f"Vis {vis} | "
+            f"{waff_item.get('weather_desc_en') or waff_item.get('weather_desc', '')}"
+        )
+        pdf_texts.append(waff_text)
+        waff_source = f"https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={waff_adm4} (fallback)"
+    else:
+        waff_text = f"WAFF data not available: {waff_err or api_err}"
+        pdf_texts.append(waff_text)
+        waff_source = "Unavailable"
+
+pdf_texts.append("")
 
 # YAN Locations
-st.header("YAN LOCATIONS")
+pdf_texts.append("YAN LOCATIONS")
 locations = {
     "Watusongu": "72.09.06.2006",
     "Wontowu": "72.09.06.2005",
@@ -320,57 +336,88 @@ locations = {
 rows = []
 for name, adm4 in locations.items():
     item, lokasi, err = get_bmkg_current(adm4)
-    if item:
-        kab = lokasi.get("kabupaten", "") if lokasi else ""
-        kec = lokasi.get("kecamatan", "") if lokasi else ""
-        desa = lokasi.get("desa", "") if lokasi else ""
-        loc_str = f"{kab} - {kec} - {desa}".strip(" - ")
-        wind_kmh = item.get("ws", 0)
-        try:
-            wind_kt = round(float(wind_kmh) / 1.852, 1)
-        except Exception:
-            wind_kt = "N/A"
+    if item and lokasi:
+        kab = lokasi.get("kotkab", "")
+        kec = lokasi.get("kecamatan", "")
+        desa = lokasi.get("desa", "")
+        admin_col = f"{kab} - {kec} - {desa}".strip(" -")
+        ws_kmh = item.get("ws") or 0
+        ws_kt = round(float(ws_kmh) / 1.852, 1) if ws_kmh else ""
+        vis = item.get("vs_text") or item.get("vs") or "N/A"
         rows.append({
             "Location": name,
-            "Kabupaten-Kecamatan-Desa": loc_str,
-            "Time (UTC)": item.get("local_datetime", "N/A"),
-            "Temp": f"{item.get('t', 'N/A')} °C",
-            "Weather": item.get("weather_desc", "N/A"),
-            "Wind": f"{item.get('wd', 'N/A')} {wind_kt} kt",
-            "Visibility": item.get("vs", "N/A"),
-            "Clouds": f"{item.get('tcc', 'N/A')}%",
+            "Kabupaten-Kecamatan-Desa": admin_col,
+            "UTC time": item.get("utc_datetime", ""),
+            "Temp C": item.get("t", ""),
+            "Humidity %": item.get("hu", ""),
+            "Wind": f"{item.get('wd', '')} {ws_kt} kt",
+            "Clouds %": item.get("tcc", ""),
+            "Visibility": vis,
+            "Weather": item.get("weather_desc_en") or item.get("weather_desc", ""),
         })
+        pdf_texts.append(
+            f"{name} | {admin_col} | {item.get('utc_datetime', '')} UTC | "
+            f"{item.get('t', '')}C | Wind {item.get('wd', '')} {ws_kt} kt | "
+            f"Clouds {item.get('tcc', '')}% | Vis {vis} | "
+            f"{item.get('weather_desc_en') or item.get('weather_desc', '')}"
+        )
     else:
-        rows.append({"Location": name, "Error": err or "No data"})
+        rows.append({
+            "Location": name,
+            "Kabupaten-Kecamatan-Desa": "N/A",
+            "Error": err or "No data"
+        })
+        pdf_texts.append(f"{name}: Error - {err}")
+
+pdf_bytes = generate_pdf(now, pdf_texts, image_list)
+
+# ========== PAGE DISPLAY ==========
+st.download_button(
+    label="Save PDF",
+    data=pdf_bytes,
+    file_name=f"Yan_Weather_Report_{now.replace(' ', '_').replace(':', '')}.pdf",
+    mime="application/pdf",
+    key="pdf_top"
+)
+
+st.header(f"Timestamp: {now}")
+
+st.header("Satellite Images")
+st.subheader("Himawari IR Enhanced")
+st.image(himawari_url, use_container_width=True)
+st.caption(f"Source: {himawari_url}")
+
+st.subheader("Citra Sebaran Asap")
+st.image(asap_url, use_container_width=True)
+st.caption(f"Source: {asap_url}")
+
+st.header("BMKG Prakiraan Angin")
+st.image(angin_url, use_container_width=True)
+st.caption(f"Source: {angin_url}")
+
+st.header("WAMM - Sam Ratulangi International Airport (Manado)")
+st.subheader("METAR")
+st.text(metar_raw)
+st.caption(f"Source: {metar_url}")
+st.subheader("TAF")
+st.text(taf_raw)
+st.caption(f"Source: {taf_url}")
+
+st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
+st.write(waff_text)
+st.caption(f"Source: {waff_source}")
+
+st.header("YAN LOCATIONS")
 if rows:
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
 st.caption("Source: https://api.bmkg.go.id/publik/prakiraan-cuaca")
 
-# Windy
 st.header("WINDY.COM")
 windy_embed = "https://embed.windy.com/embed2.html?lat=-1.0&lon=121.0&detailLat=-1.0&detailLon=121.0&width=650&height=450&zoom=6&level=surface&overlay=wind&product=ecmwf&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1"
 st.components.v1.iframe(windy_embed, height=500)
 st.caption("Source: https://www.windy.com (low-level winds, central Sulawesi)")
 
-# ---------- PDF generation ----------
-pdf_texts = []
-pdf_texts.append(f"WAMM METAR: {metar_raw}")
-pdf_texts.append(f"WAMM TAF: {taf_raw}")
-pdf_texts.append(f"WAFF: {waff_text if 'waff_text' in locals() else 'Not available'}")
-pdf_texts.append("YAN LOCATIONS:\n" + df.to_string(index=False) if 'df' in locals() else "No location data")
-
-image_list = [
-    ("Himawari IR Enhanced", himawari_url),
-    ("Citra Sebaran Asap", asap_url),
-    ("BMKG Prakiraan Angin", angin_url),
-]
-if radar_url:
-    image_list.append(("RainViewer Radar", radar_url))
-
-pdf_bytes = generate_pdf(now, pdf_texts, image_list)
-
-# Update both download buttons
 st.download_button(
     label="Save PDF",
     data=pdf_bytes,
@@ -378,7 +425,3 @@ st.download_button(
     mime="application/pdf",
     key="pdf_bottom"
 )
-
-# Top button needs to be re-rendered with data – Streamlit limitation workaround:
-# The top button is placed early; we re-create it at the end with the real data if needed.
-# For simplicity the bottom button is the reliable one; you can move the top one after PDF generation if preferred.
