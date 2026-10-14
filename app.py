@@ -325,13 +325,14 @@ pdf_texts.append("")
 pdf_texts.append("YAN LOCATIONS")
 locations = {
     "Watusongu": "72.09.06.2006",
-    "Wontowu": "72.09.06.2005",
+    "Wontowu": "72.09.06.2019",
     "Paramba": "72.12.09.2014",
     "Kayupoli": "72.12.08.2019",
     "Kolakolamon": "72.01.09.2037",
-    "Lokait": "72.01.17.2012",
+    "Moitoitom": "72.01.17.2011",
     "Waimiha": "82.08.07.2006",
     "Lili": "82.06.09.2004",
+    "Eeya": "72.08.18.2003",
 }
 rows = []
 for name, adm4 in locations.items():
