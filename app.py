@@ -43,55 +43,64 @@ def get_bmkg_current(adm4):
 # ---------- Helper: Generate PDF ----------
 def generate_pdf(timestamp, texts, image_urls):
     pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # Page 1: Title + timestamp + two satellite images (aspect ratio preserved)
+    # ===== PAGE 1: Title + timestamp + two satellite images =====
     pdf.set_font("Helvetica", size=14)
     pdf.cell(0, 8, "Yan Weather Report", ln=True, align="C")
     pdf.set_font("Helvetica", size=10)
     pdf.cell(0, 6, timestamp, ln=True, align="C")
-    pdf.ln(3)
+    pdf.ln(4)
 
-    y_pos = 28
-    for title, url in image_urls[:2]:
-        try:
-            img_resp = requests.get(url, timeout=15)
-            if img_resp.status_code == 200:
-                # Only set width → FPDF preserves aspect ratio
-                pdf.image(BytesIO(img_resp.content), x=20, y=y_pos, w=170)
-                # Approximate height advance (images are wide; adjust if needed)
-                y_pos += 78
-            else:
-                pdf.set_xy(20, y_pos)
-                pdf.cell(0, 6, f"{title} - not available", ln=True)
-                y_pos += 8
-        except Exception:
-            pdf.set_xy(20, y_pos)
-            pdf.cell(0, 6, f"{title} - not available", ln=True)
-            y_pos += 8
+    # Himawari
+    try:
+        img_resp = requests.get(image_urls[0][1], timeout=15)
+        if img_resp.status_code == 200:
+            pdf.image(BytesIO(img_resp.content), x=15, y=28, w=180)
+            # Force next Y well below the image (safe margin)
+            pdf.set_y(28 + 75)
+        else:
+            pdf.set_y(28)
+            pdf.cell(0, 6, "Himawari IR Enhanced - not available", ln=True)
+    except Exception:
+        pdf.set_y(28)
+        pdf.cell(0, 6, "Himawari IR Enhanced - not available", ln=True)
 
-    # Page 2: Angin image + text data
+    pdf.ln(6)
+
+    # Citra Sebaran Asap
+    current_y = pdf.get_y()
+    try:
+        img_resp = requests.get(image_urls[1][1], timeout=15)
+        if img_resp.status_code == 200:
+            pdf.image(BytesIO(img_resp.content), x=15, y=current_y, w=180)
+        else:
+            pdf.cell(0, 6, "Citra Sebaran Asap - not available", ln=True)
+    except Exception:
+        pdf.cell(0, 6, "Citra Sebaran Asap - not available", ln=True)
+
+    # ===== PAGE 2: Angin image + all text data =====
     pdf.add_page()
+
     try:
         img_resp = requests.get(image_urls[2][1], timeout=15)
         if img_resp.status_code == 200:
-            # Only width set → aspect ratio preserved
-            pdf.image(BytesIO(img_resp.content), x=20, y=12, w=170)
+            pdf.image(BytesIO(img_resp.content), x=15, y=12, w=180)
         else:
-            pdf.set_xy(20, 12)
+            pdf.set_y(12)
             pdf.cell(0, 6, "BMKG Prakiraan Angin - not available", ln=True)
     except Exception:
-        pdf.set_xy(20, 12)
+        pdf.set_y(12)
         pdf.cell(0, 6, "BMKG Prakiraan Angin - not available", ln=True)
 
-    # Text data starting lower on page 2
-    pdf.set_y(105)
+    # Start text safely below the angin image
+    pdf.set_y(115)
     pdf.set_font("Helvetica", size=9)
     for line in texts:
         safe = line.replace("–", "-").replace("—", "-").replace("°", " deg")
         pdf.multi_cell(0, 4.5, safe)
-        pdf.ln(0.4)
+        pdf.ln(0.5)
 
     return bytes(pdf.output())
 
