@@ -7,7 +7,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-# Version 2.2
+# Version 2.3
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -91,7 +91,6 @@ def scrape_waff_bandara():
                     if m:
                         result["visibility"] = m.group(0).strip()
 
-            # Wind speed – now handles whole numbers and numbers with comma/decimal
             if "kecepatan angin" in low or re.search(r"\d+(?:[.,]\d+)?\s*km/jam", low):
                 m = re.search(r"(\d+(?:[.,]\d+)?)\s*km/jam", line, re.I)
                 if m:
@@ -273,23 +272,24 @@ if waff_data:
     if waff_data.get("weather"):
         parts.append(waff_data["weather"])
     if waff_data.get("visibility"):
-        parts.append(f"Vis {waff_data['visibility']}")
+        parts.append(f"Visibility {waff_data['visibility']}")
 
-    # Wind speed → knots (handles both whole numbers and decimals)
+    # Combined wind: direction + speed in knots
+    wind_parts = []
+    if waff_data.get("wind_dir"):
+        abbr = dir_map.get(waff_data["wind_dir"].lower(), waff_data["wind_dir"])
+        wind_parts.append(abbr)
     if waff_data.get("wind_speed"):
         try:
             kmh_str = re.search(r"[\d.]+", waff_data["wind_speed"])
             if kmh_str:
                 kmh = float(kmh_str.group())
                 kt = round(kmh / 1.852, 1)
-                parts.append(f"Wind {kt} kt")
+                wind_parts.append(f"{kt} kt")
         except Exception:
-            parts.append(f"Wind {waff_data['wind_speed']}")
-
-    # Wind direction → abbreviated English
-    if waff_data.get("wind_dir"):
-        abbr = dir_map.get(waff_data["wind_dir"].lower(), waff_data["wind_dir"])
-        parts.append(abbr)
+            wind_parts.append(waff_data["wind_speed"])
+    if wind_parts:
+        parts.append("Wind " + " ".join(wind_parts))
 
     if waff_data.get("pressure"):
         parts.append(waff_data["pressure"])
