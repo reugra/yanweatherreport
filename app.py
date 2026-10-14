@@ -5,7 +5,7 @@ from datetime import datetime
 from fpdf import FPDF
 from io import BytesIO
 
-# Version 1.2
+# Version 1.3
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -41,68 +41,58 @@ def get_bmkg_current(adm4):
     except Exception as e:
         return None, None, str(e)
 
-# ---------- Helper: Generate PDF ----------
+# ---------- Helper: Generate PDF (half-page layout) ----------
 def generate_pdf(timestamp, texts, image_urls):
     pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(auto=False)  # manual control to avoid overlap
+    pdf.set_margins(12, 12, 12)
 
     # ===== PAGE 1 =====
     pdf.add_page()
-    pdf.set_font("Helvetica", size=14)
-    pdf.cell(0, 8, "Yan Weather Report", ln=True, align="C")
-    pdf.set_font("Helvetica", size=10)
-    pdf.cell(0, 6, timestamp, ln=True, align="C")
-    pdf.ln(4)
 
-    # Himawari (80% width)
+    # Top half: title + timestamp + Himawari
+    pdf.set_font("Helvetica", size=13)
+    pdf.set_xy(12, 12)
+    pdf.cell(0, 7, "Yan Weather Report", ln=True, align="C")
+    pdf.set_font("Helvetica", size=9)
+    pdf.cell(0, 5, timestamp, ln=True, align="C")
+
     try:
         img_resp = requests.get(image_urls[0][1], timeout=15)
         if img_resp.status_code == 200:
-            pdf.image(BytesIO(img_resp.content), x=20, y=28, w=152)
-            pdf.set_y(28 + 70)  # move cursor safely below image
-        else:
-            pdf.set_y(28)
-            pdf.cell(0, 6, "Himawari IR Enhanced - not available", ln=True)
+            pdf.image(BytesIO(img_resp.content), x=20, y=30, w=160)
     except Exception:
-        pdf.set_y(28)
-        pdf.cell(0, 6, "Himawari IR Enhanced - not available", ln=True)
+        pdf.set_xy(20, 40)
+        pdf.cell(0, 5, "Himawari IR Enhanced - not available")
 
-    pdf.ln(8)  # small empty space
-
-    # Citra Sebaran Asap (80% width)
-    current_y = pdf.get_y()
+    # Bottom half: Citra Sebaran Asap
     try:
         img_resp = requests.get(image_urls[1][1], timeout=15)
         if img_resp.status_code == 200:
-            pdf.image(BytesIO(img_resp.content), x=20, y=current_y, w=152)
-        else:
-            pdf.cell(0, 6, "Citra Sebaran Asap - not available", ln=True)
+            pdf.image(BytesIO(img_resp.content), x=20, y=155, w=160)
     except Exception:
-        pdf.cell(0, 6, "Citra Sebaran Asap - not available", ln=True)
+        pdf.set_xy(20, 165)
+        pdf.cell(0, 5, "Citra Sebaran Asap - not available")
 
     # ===== PAGE 2 =====
     pdf.add_page()
 
-    # BMKG Prakiraan Angin at top (80% width)
+    # Top half: BMKG Prakiraan Angin
     try:
         img_resp = requests.get(image_urls[2][1], timeout=15)
         if img_resp.status_code == 200:
-            pdf.image(BytesIO(img_resp.content), x=20, y=12, w=152)
-        else:
-            pdf.set_y(12)
-            pdf.cell(0, 6, "BMKG Prakiraan Angin - not available", ln=True)
+            pdf.image(BytesIO(img_resp.content), x=20, y=15, w=160)
     except Exception:
-        pdf.set_y(12)
-        pdf.cell(0, 6, "BMKG Prakiraan Angin - not available", ln=True)
+        pdf.set_xy(20, 25)
+        pdf.cell(0, 5, "BMKG Prakiraan Angin - not available")
 
-    # Small empty space then text data
-    pdf.set_y(100)
-    pdf.ln(6)
-    pdf.set_font("Helvetica", size=9)
+    # Bottom half: text data
+    pdf.set_xy(12, 155)
+    pdf.set_font("Helvetica", size=8)
     for line in texts:
         safe = line.replace("–", "-").replace("—", "-").replace("°", " deg")
-        pdf.multi_cell(0, 4.5, safe)
-        pdf.ln(0.5)
+        pdf.multi_cell(0, 4, safe)
+        pdf.ln(0.3)
 
     return bytes(pdf.output())
 
