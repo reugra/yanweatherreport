@@ -7,7 +7,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-# Version 2.1
+# Version 2.2
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -91,12 +91,13 @@ def scrape_waff_bandara():
                     if m:
                         result["visibility"] = m.group(0).strip()
 
-            if "kecepatan angin" in low or re.search(r"\d+[.,]\d+\s*km/jam", low):
-                m = re.search(r"(\d+[.,]\d+)\s*km/jam", line, re.I)
+            # Wind speed – now handles whole numbers and numbers with comma/decimal
+            if "kecepatan angin" in low or re.search(r"\d+(?:[.,]\d+)?\s*km/jam", low):
+                m = re.search(r"(\d+(?:[.,]\d+)?)\s*km/jam", line, re.I)
                 if m:
                     result["wind_speed"] = m.group(0).replace(",", ".").strip()
                 elif i + 1 < len(lines):
-                    m = re.search(r"(\d+[.,]\d+)\s*km/jam", lines[i+1], re.I)
+                    m = re.search(r"(\d+(?:[.,]\d+)?)\s*km/jam", lines[i+1], re.I)
                     if m:
                         result["wind_speed"] = m.group(0).replace(",", ".").strip()
 
@@ -251,7 +252,6 @@ waff_data, waff_err, _ = scrape_waff_bandara()
 waff_text = "Not available"
 waff_source = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
 
-# Direction mapping
 dir_map = {
     "utara": "N",
     "timur laut": "NE",
@@ -275,7 +275,7 @@ if waff_data:
     if waff_data.get("visibility"):
         parts.append(f"Vis {waff_data['visibility']}")
 
-    # Wind speed → knots
+    # Wind speed → knots (handles both whole numbers and decimals)
     if waff_data.get("wind_speed"):
         try:
             kmh_str = re.search(r"[\d.]+", waff_data["wind_speed"])
