@@ -7,7 +7,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-# Version 1.9
+# Version 2.0
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -59,11 +59,9 @@ def scrape_waff_bandara():
         soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
         lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-        debug_lines = lines[:120]
 
         result = {}
 
-        # Short weather labels we want (prefer these)
         short_weather = {
             "berasap", "cerah", "berawan", "cerah berawan", "cerah - berawan",
             "udara kabur", "kabut/asap", "hujan ringan", "hujan", "cerah-berawan"
@@ -72,22 +70,18 @@ def scrape_waff_bandara():
         for i, line in enumerate(lines):
             low = line.lower()
 
-            # Date / time stamp (e.g. "14 Okt 2026 • 11.00 WITA") – appears just before temperature
             if re.search(r"\d{1,2}\s+[A-Za-z]+\s+\d{4}", line) and ("wita" in low or "wib" in low or "wit" in low or "•" in line):
                 if "datetime" not in result:
                     result["datetime"] = line.strip()
 
-            # Temperature
             if re.search(r"\d+\s*°C", line) and "titik" not in low and "embun" not in low:
                 if "temp" not in result:
                     result["temp"] = re.search(r"(\d+\s*°C)", line).group(1).strip()
 
-            # Weather – prefer short labels near the temperature
             if line.lower() in short_weather or line in ["Berasap", "Cerah", "Berawan", "Cerah - Berawan"]:
                 if "weather" not in result or len(line) < len(result.get("weather", "")):
                     result["weather"] = line.strip()
 
-            # Visibility
             if "jarak pandang" in low:
                 m = re.search(r"(\d+(?:[.,]\d+)?)\s*km", line, re.I)
                 if m:
@@ -97,7 +91,6 @@ def scrape_waff_bandara():
                     if m:
                         result["visibility"] = m.group(0).strip()
 
-            # Wind speed
             if "kecepatan angin" in low or re.search(r"\d+[.,]\d+\s*km/jam", low):
                 m = re.search(r"(\d+[.,]\d+)\s*km/jam", line, re.I)
                 if m:
@@ -107,7 +100,6 @@ def scrape_waff_bandara():
                     if m:
                         result["wind_speed"] = m.group(0).replace(",", ".").strip()
 
-            # Wind direction – full phrases
             if "arah angin" in low:
                 full_dirs = [
                     "barat daya", "barat laut", "timur laut", "tenggara",
@@ -124,13 +116,11 @@ def scrape_waff_bandara():
                             result["wind_dir"] = d.title()
                             break
 
-            # Pressure
             if "tekanan" in low or "hpa" in low:
                 m = re.search(r"(\d+[.,]\d+)\s*hpa", line, re.I)
                 if m:
                     result["pressure"] = m.group(0).replace(",", ".").strip()
 
-            # Dew point
             if "titik embun" in low:
                 m = re.search(r"(\d+)\s*°C", line)
                 if m:
@@ -143,8 +133,8 @@ def scrape_waff_bandara():
         result = {k: v for k, v in result.items() if v}
 
         if result:
-            return result, None, debug_lines
-        return None, "No key fields parsed", debug_lines
+            return result, None, []
+        return None, "No key fields parsed", []
 
     except Exception as e:
         return None, str(e), []
@@ -192,12 +182,10 @@ def generate_pdf(timestamp, texts, image_urls):
     pdf.set_xy(12, 155)
     pdf.set_font("Helvetica", size=8)
     for line in texts:
-        # Stronger cleaning for FPDF latin-1 fonts
         safe = (line
                 .replace("–", "-")
                 .replace("—", "-")
                 .replace("°", " deg")
-                .replace("•", " - ")
                 .replace("•", " - ")
                 .encode("ascii", "ignore")
                 .decode("ascii"))
@@ -259,7 +247,7 @@ pdf_texts.append("")
 
 # WAFF
 pdf_texts.append("WAFF - Mutiara SIS Al-Jufrie (Palu)")
-waff_data, waff_err, debug_lines = scrape_waff_bandara()
+waff_data, waff_err, _ = scrape_waff_bandara()
 waff_text = "Not available"
 waff_source = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
 
@@ -388,18 +376,7 @@ st.text(taf_raw)
 st.caption(f"Source: {taf_url}")
 
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
-if waff_data:
-    st.success("Bandara page scraped successfully")
-    st.write(waff_text)
-    with st.expander("Parsed fields (debug)"):
-        st.json(waff_data)
-else:
-    st.warning(f"Bandara page failed: {waff_err}")
-    st.write(waff_text)
-    if debug_lines:
-        with st.expander("Raw page lines (first 120) for troubleshooting"):
-            st.text("\n".join(debug_lines))
-
+st.write(waff_text)
 st.caption(f"Source: {waff_source}")
 
 st.header("SULAWESI TENGAH LOCATIONS")
