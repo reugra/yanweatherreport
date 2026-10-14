@@ -7,7 +7,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-# Version 1.7
+# Version 1.8
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -71,6 +71,11 @@ def scrape_waff_bandara():
 
         for i, line in enumerate(lines):
             low = line.lower()
+
+            # Date / time stamp (e.g. "14 Okt 2026 • 11.00 WITA") – appears just before temperature
+            if re.search(r"\d{1,2}\s+[A-Za-z]+\s+\d{4}", line) and ("wita" in low or "wib" in low or "wit" in low or "•" in line):
+                if "datetime" not in result:
+                    result["datetime"] = line.strip()
 
             # Temperature
             if re.search(r"\d+\s*°C", line) and "titik" not in low and "embun" not in low:
@@ -248,6 +253,8 @@ waff_source = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
 
 if waff_data:
     parts = []
+    if waff_data.get("datetime"):
+        parts.append(waff_data["datetime"])
     if waff_data.get("temp"):
         parts.append(waff_data["temp"])
     if waff_data.get("weather"):
