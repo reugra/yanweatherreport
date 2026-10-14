@@ -7,7 +7,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-# Version 1.5
+# Version 1.6
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -50,7 +50,7 @@ def scrape_waff_bandara():
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Language": "id-ID,id;q=0.9,en;q=0.8",
         }
         resp = requests.get(url, headers=headers, timeout=15)
         if resp.status_code != 200:
@@ -59,58 +59,80 @@ def scrape_waff_bandara():
         soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
         lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        debug_lines = lines[:100]
 
         result = {}
-        debug_lines = lines[:80]  # first 80 lines for troubleshooting
 
-        # More precise matching
         for i, line in enumerate(lines):
             low = line.lower()
 
-            # Temperature (look for number + °C, avoid dewpoint)
+            # Temperature
             if re.search(r"\d+\s*°C", line) and "titik" not in low and "embun" not in low:
                 if "temp" not in result:
-                    result["temp"] = line.strip()
+                    result["temp"] = re.search(r"(\d+\s*°C)", line).group(1).strip()
 
             # Visibility
             if "jarak pandang" in low:
-                # take the next non-empty line if current line is only the label
-                if ":" in line:
-                    val = line.split(":", 1)[-1].strip()
-                    if val:
-                        result["visibility"] = val
+                # value may be on same line or next
+                m = re.search(r"(\d+(?:[.,]\d+)?)\s*km", line, re.I)
+                if m:
+                    result["visibility"] = m.group(0).strip()
                 elif i + 1 < len(lines):
-                    result["visibility"] = lines[i + 1].strip()
+                    m = re.search(r"(\d+(?:[.,]\d+)?)\s*km", lines[i+1], re.I)
+                    if m:
+                        result["visibility"] = m.group(0).strip()
 
             # Wind speed
-            if "kecepatan angin" in low or ("km/jam" in low and "angin" in low):
-                if ":" in line:
-                    result["wind_speed"] = line.split(":", 1)[-1].strip()
-                else:
-                    result["wind_speed"] = line.strip()
+            if "kecepatan angin" in low or re.search(r"\d+[.,]\d+\s*km/jam", low):
+                m = re.search(r"(\d+[.,]\d+)\s*km/jam", line, re.I)
+                if m:
+                    result["wind_speed"] = m.group(0).replace(",", ".").strip()
+                elif i + 1 < len(lines):
+                    m = re.search(r"(\d+[.,]\d+)\s*km/jam", lines[i+1], re.I)
+                    if m:
+                        result["wind_speed"] = m.group(0).replace(",", ".").strip()
 
             # Wind direction
             if "arah angin" in low:
-                if ":" in line:
-                    result["wind_dir"] = line.split(":", 1)[-1].strip()
-                elif i + 1 < len(lines):
-                    result["wind_dir"] = lines[i + 1].strip()
+                # look for common direction words
+                directions = ["utara", "timur", "selatan", "barat", "timur laut", "tenggara",
+                              "barat daya", "barat laut", "variabel"]
+                for d in directions:
+                    if d in low:
+                        result["wind_dir"] = d.title()
+                        break
+                if "wind_dir" not in result and i + 1 < len(lines):
+                    next_low = lines[i+1].lower()
+                    for d in directions:
+                        if d in next_low:
+                            result["wind_dir"] = d.title()
+                            break
 
             # Pressure
-            if "hpa" in low and "tekanan" in low:
-                result["pressure"] = line.strip()
+            if "tekanan" in low or "hpa" in low:
+                m = re.search(r"(\d+[.,]\d+)\s*hpa", line, re.I)
+                if m:
+                    result["pressure"] = m.group(0).replace(",", ".").strip()
 
             # Dew point
             if "titik embun" in low:
-                if ":" in line:
-                    result["dewpoint"] = line.split(":", 1)[-1].strip()
-                else:
-                    result["dewpoint"] = line.strip()
+                m = re.search(r"(\d+)\s*°C", line)
+                if m:
+                    result["dewpoint"] = m.group(0).strip()
+                elif i + 1 < len(lines):
+                    m = re.search(r"(\d+)\s*°C", lines[i+1])
+                    if m:
+                        result["dewpoint"] = m.group(0).strip()
 
-            # Weather description (common short labels)
-            if line in ["Berasap", "Cerah", "Berawan", "Cerah - Berawan", "Cerah Berawan",
-                        "Udara Kabur", "Kabut/Asap", "Hujan Ringan", "Hujan"]:
-                result["weather"] = line
+            # Weather
+            weather_words = ["berasap", "cerah", "berawan", "cerah berawan", "cerah - berawan",
+                             "udara kabur", "kabut/asap", "hujan ringan", "hujan"]
+            if line.lower() in weather_words or any(w in low for w in weather_words):
+                if "weather" not in result:
+                    result["weather"] = line.strip()
+
+        # Clean empty strings
+        result = {k: v for k, v in result.items() if v}
 
         if result:
             return result, None, debug_lines
@@ -215,7 +237,7 @@ except Exception as e:
 
 pdf_texts.append("")
 
-# WAFF - bandara page first
+# WAFF
 pdf_texts.append("WAFF - Mutiara SIS Al-Jufrie (Palu)")
 waff_data, waff_err, debug_lines = scrape_waff_bandara()
 waff_text = "Not available"
@@ -240,7 +262,6 @@ if waff_data:
     waff_text = " | ".join(parts) if parts else "Parsed but empty"
     pdf_texts.append(waff_text)
 else:
-    # Fallback
     waff_adm4 = "72.71.06.1001"
     waff_item, _, api_err = get_bmkg_current(waff_adm4)
     if waff_item:
@@ -354,7 +375,7 @@ else:
     st.warning(f"Bandara page failed: {waff_err}")
     st.write(waff_text)
     if debug_lines:
-        with st.expander("Raw page lines (first 80) for troubleshooting"):
+        with st.expander("Raw page lines (first 100) for troubleshooting"):
             st.text("\n".join(debug_lines))
 
 st.caption(f"Source: {waff_source}")
