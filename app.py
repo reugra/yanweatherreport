@@ -4,8 +4,9 @@ import pandas as pd
 from datetime import datetime
 from fpdf import FPDF
 from io import BytesIO
+from bs4 import BeautifulSoup
 
-# Version 1.3
+# Version 1.4
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -41,10 +42,47 @@ def get_bmkg_current(adm4):
     except Exception as e:
         return None, None, str(e)
 
+# ---------- Helper: Scrape WAFF current conditions from bandara page ----------
+def scrape_waff_bandara():
+    url = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            return None, f"HTTP {resp.status_code}"
+        soup = BeautifulSoup(resp.text, "html.parser")
+        text = soup.get_text(separator="\n", strip=True)
+
+        # Simple extraction of key lines
+        lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        result = {"source": "bandara page"}
+        for i, line in enumerate(lines):
+            if "Jarak Pandang" in line or "jarak pandang" in line.lower():
+                result["visibility"] = line.split(":")[-1].strip() if ":" in line else line
+            if "°C" in line and any(c.isdigit() for c in line) and "Titik" not in line:
+                if "temp" not in result:
+                    result["temp"] = line.strip()
+            if "km/jam" in line or "km/j" in line:
+                result["wind_speed"] = line.strip()
+            if "Arah Angin" in line or "arah angin" in line.lower():
+                result["wind_dir"] = line.split(":")[-1].strip() if ":" in line else line
+            if "hPa" in line:
+                result["pressure"] = line.strip()
+            if "Titik Embun" in line or "titik embun" in line.lower():
+                result["dewpoint"] = line.split(":")[-1].strip() if ":" in line else line
+            if line in ["Berasap", "Cerah", "Berawan", "Cerah - Berawan", "Udara Kabur", "Kabut/Asap"]:
+                result["weather"] = line
+
+        if "visibility" in result or "temp" in result:
+            return result, None
+        return None, "Could not parse conditions"
+    except Exception as e:
+        return None, str(e)
+
 # ---------- Helper: Generate PDF (half-page layout) ----------
 def generate_pdf(timestamp, texts, image_urls):
     pdf = FPDF()
-    pdf.set_auto_page_break(auto=False)  # manual control to avoid overlap
+    pdf.set_auto_page_break(auto=False)
     pdf.set_margins(12, 12, 12)
 
     # ===== PAGE 1 =====
@@ -143,26 +181,51 @@ except Exception as e:
 
 pdf_texts.append("")
 
-# WAFF
+# WAFF - try bandara page first, then fallback
 pdf_texts.append("WAFF - Mutiara SIS Al-Jufrie (Palu)")
-waff_adm4 = "72.71.06.1001"
-waff_item, waff_lokasi, waff_err = get_bmkg_current(waff_adm4)
-if waff_item:
-    ws_kmh = waff_item.get("ws") or 0
-    ws_kt = round(float(ws_kmh) / 1.852, 1) if ws_kmh else ""
-    vis = waff_item.get("vs_text") or waff_item.get("vs") or "N/A"
-    waff_text = (
-        f"{waff_item.get('utc_datetime', '')} UTC | "
-        f"{waff_item.get('t', '')} deg C | "
-        f"Wind {waff_item.get('wd', '')} {ws_kt} kt | "
-        f"Clouds {waff_item.get('tcc', '')}% | "
-        f"Vis {vis} | "
-        f"{waff_item.get('weather_desc_en') or waff_item.get('weather_desc', '')}"
-    )
+waff_data, waff_err = scrape_waff_bandara()
+waff_text = "Not available"
+if waff_data:
+    parts = []
+    if waff_data.get("temp"):
+        parts.append(waff_data["temp"])
+    if waff_data.get("weather"):
+        parts.append(waff_data["weather"])
+    if waff_data.get("visibility"):
+        parts.append(f"Vis {waff_data['visibility']}")
+    if waff_data.get("wind_speed"):
+        parts.append(waff_data["wind_speed"])
+    if waff_data.get("wind_dir"):
+        parts.append(waff_data["wind_dir"])
+    if waff_data.get("pressure"):
+        parts.append(waff_data["pressure"])
+    if waff_data.get("dewpoint"):
+        parts.append(f"Dew {waff_data['dewpoint']}")
+    waff_text = " | ".join(parts) if parts else "Parsed but empty"
     pdf_texts.append(waff_text)
+    waff_source = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
 else:
-    waff_text = f"WAFF data not available: {waff_err}"
-    pdf_texts.append(waff_text)
+    # Fallback to forecast API
+    waff_adm4 = "72.71.06.1001"
+    waff_item, waff_lokasi, api_err = get_bmkg_current(waff_adm4)
+    if waff_item:
+        ws_kmh = waff_item.get("ws") or 0
+        ws_kt = round(float(ws_kmh) / 1.852, 1) if ws_kmh else ""
+        vis = waff_item.get("vs_text") or waff_item.get("vs") or "N/A"
+        waff_text = (
+            f"{waff_item.get('utc_datetime', '')} UTC | "
+            f"{waff_item.get('t', '')} deg C | "
+            f"Wind {waff_item.get('wd', '')} {ws_kt} kt | "
+            f"Clouds {waff_item.get('tcc', '')}% | "
+            f"Vis {vis} | "
+            f"{waff_item.get('weather_desc_en') or waff_item.get('weather_desc', '')}"
+        )
+        pdf_texts.append(waff_text)
+        waff_source = f"https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={waff_adm4} (fallback)"
+    else:
+        waff_text = f"WAFF data not available: {waff_err or api_err}"
+        pdf_texts.append(waff_text)
+        waff_source = "Unavailable"
 
 pdf_texts.append("")
 
@@ -247,11 +310,11 @@ st.text(taf_raw)
 st.caption(f"Source: {taf_url}")
 
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
-if waff_item:
+if waff_data:
     st.write(waff_text)
 else:
     st.warning(waff_text)
-st.caption(f"Source: https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={waff_adm4}")
+st.caption(f"Source: {waff_source}")
 
 st.header("SULAWESI TENGAH LOCATIONS")
 if rows:
