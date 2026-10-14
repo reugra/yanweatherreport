@@ -1,4 +1,4 @@
-# Version 2.8 – WAFF scraper generalized; WAFW and WAEE added with identical method
+# Version 2.9 – added WAFP between WAFW and WAEE
 import streamlit as st
 import requests
 import pandas as pd
@@ -303,6 +303,13 @@ wafw_text = format_airport_text(wafw_data) if wafw_data else f"Not available ({w
 pdf_texts.append(wafw_text)
 pdf_texts.append("")
 
+# WAFP
+pdf_texts.append("WAFP - Kasiguncu Airport (Poso)")
+wafp_data, wafp_err = scrape_bandara("WAFP")
+wafp_text = format_airport_text(wafp_data) if wafp_data else f"Not available ({wafp_err})"
+pdf_texts.append(wafp_text)
+pdf_texts.append("")
+
 # WAEE
 pdf_texts.append("WAEE - Sultan Babullah Airport (Ternate)")
 waee_data, waee_err = scrape_bandara("WAEE")
@@ -400,6 +407,10 @@ st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAFF")
 st.header("WAFW - Syukuran Aminuddin Amir Airport (Luwuk)")
 st.write(wafw_text)
 st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAFW")
+
+st.header("WAFP - Kasiguncu Airport (Poso)")
+st.write(wafp_text)
+st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAFP")
 
 st.header("WAEE - Sultan Babullah Airport (Ternate)")
 st.write(waee_text)
