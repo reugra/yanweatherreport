@@ -43,37 +43,53 @@ def get_bmkg_current(adm4):
 # ---------- Helper: Generate PDF ----------
 def generate_pdf(timestamp, texts, image_urls):
     pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
-    pdf.set_font("Helvetica", size=14)
-    pdf.cell(0, 10, "Yan Weather Report", ln=True, align="C")
-    pdf.set_font("Helvetica", size=10)
-    pdf.cell(0, 8, timestamp, ln=True, align="C")
-    pdf.ln(6)
 
-    # Embed the three images in order
-    for title, url in image_urls:
+    # Page 1: Title + timestamp + two satellite images
+    pdf.set_font("Helvetica", size=14)
+    pdf.cell(0, 8, "Yan Weather Report", ln=True, align="C")
+    pdf.set_font("Helvetica", size=10)
+    pdf.cell(0, 6, timestamp, ln=True, align="C")
+    pdf.ln(2)
+
+    # Himawari + Asap (stacked, scaled)
+    y_pos = 25
+    for title, url in image_urls[:2]:
         try:
             img_resp = requests.get(url, timeout=15)
             if img_resp.status_code == 200:
-                pdf.add_page()
-                pdf.set_font("Helvetica", size=12)
-                pdf.cell(0, 10, title, ln=True)
-                pdf.image(BytesIO(img_resp.content), x=10, y=30, w=190)
+                pdf.image(BytesIO(img_resp.content), x=15, y=y_pos, w=180, h=90)
+                y_pos += 95
             else:
-                pdf.add_page()
-                pdf.cell(0, 10, f"{title} - image not available", ln=True)
+                pdf.set_xy(15, y_pos)
+                pdf.cell(0, 8, f"{title} - not available", ln=True)
+                y_pos += 10
         except Exception:
-            pdf.add_page()
-            pdf.cell(0, 10, f"{title} - image not available", ln=True)
+            pdf.set_xy(15, y_pos)
+            pdf.cell(0, 8, f"{title} - not available", ln=True)
+            y_pos += 10
 
-    # Text content (WAMM, WAFF, locations)
+    # Page 2: Angin image + text data
     pdf.add_page()
+    try:
+        img_resp = requests.get(image_urls[2][1], timeout=15)
+        if img_resp.status_code == 200:
+            pdf.image(BytesIO(img_resp.content), x=15, y=15, w=180, h=100)
+        else:
+            pdf.set_xy(15, 15)
+            pdf.cell(0, 8, "BMKG Prakiraan Angin - not available", ln=True)
+    except Exception:
+        pdf.set_xy(15, 15)
+        pdf.cell(0, 8, "BMKG Prakiraan Angin - not available", ln=True)
+
+    # Text data starting below the angin image
+    pdf.set_y(120)
     pdf.set_font("Helvetica", size=9)
     for line in texts:
         safe = line.replace("–", "-").replace("—", "-").replace("°", " deg")
-        pdf.multi_cell(0, 5, safe)
-        pdf.ln(1)
+        pdf.multi_cell(0, 4.5, safe)
+        pdf.ln(0.5)
 
     return bytes(pdf.output())
 
