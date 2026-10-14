@@ -318,7 +318,7 @@ pdf_texts.append(waee_text)
 pdf_texts.append("")
 
 # YAN Locations
-pdf_texts.append("YAN LOCATIONS")
+pdf_texts.append("YAN Locations")
 locations = {
     "Watusongu": "72.09.06.2006",
     "Wontowu": "72.09.06.2019",
@@ -416,7 +416,7 @@ st.header("WAEE - Sultan Babullah Airport (Ternate)")
 st.write(waee_text)
 st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAEE")
 
-st.header("YAN LOCATIONS")
+st.header("YAN Locations")
 if rows:
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
