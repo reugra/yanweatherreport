@@ -1,4 +1,4 @@
-# Version 2.9 – added WAFP between WAFW and WAEE
+# Version 2.10 – WAMM: TAF above METAR, BMKG bandara data added below, dual sources
 import streamlit as st
 import requests
 import pandas as pd
@@ -8,7 +8,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-st.set_page_config(page_title="Yan Weather Report", layout="wide")
+st.set_page_config(page_title="Yan Weather Brief", layout="wide")
 
 # ---------- Red button style ----------
 st.markdown("""
@@ -260,6 +260,7 @@ image_list.append(("BMKG Prakiraan Angin", angin_url))
 # WAMM
 pdf_texts.append("WAMM - Sam Ratulangi International Airport (Manado)")
 metar_url = "https://aviationweather.gov/api/data/metar?ids=WAMM&format=json"
+taf_url = "https://aviationweather.gov/api/data/taf?ids=WAMM&format=json"
 try:
     m_resp = requests.get(metar_url, timeout=12)
     metar_raw = "Not available"
@@ -267,13 +268,9 @@ try:
         m_data = m_resp.json()
         if m_data and isinstance(m_data, list) and len(m_data) > 0:
             metar_raw = m_data[0].get("rawOb", "Not available")
-    pdf_texts.append("METAR:")
-    pdf_texts.append(metar_raw)
 except Exception as e:
     metar_raw = f"Error: {e}"
-    pdf_texts.append(f"METAR error: {e}")
 
-taf_url = "https://aviationweather.gov/api/data/taf?ids=WAMM&format=json"
 try:
     t_resp = requests.get(taf_url, timeout=12)
     taf_raw = "Not available"
@@ -281,12 +278,17 @@ try:
         t_data = t_resp.json()
         if t_data and isinstance(t_data, list) and len(t_data) > 0:
             taf_raw = t_data[0].get("rawTAF", "Not available")
-    pdf_texts.append("TAF:")
-    pdf_texts.append(taf_raw)
 except Exception as e:
     taf_raw = f"Error: {e}"
-    pdf_texts.append(f"TAF error: {e}")
 
+pdf_texts.append(taf_raw)
+pdf_texts.append(metar_raw)
+pdf_texts.append("")
+
+# WAMM BMKG bandara
+wamm_bmkg_data, wamm_bmkg_err = scrape_bandara("WAMM")
+wamm_bmkg_text = format_airport_text(wamm_bmkg_data) if wamm_bmkg_data else f"Not available ({wamm_bmkg_err})"
+pdf_texts.append(wamm_bmkg_text)
 pdf_texts.append("")
 
 # WAFF
@@ -318,7 +320,7 @@ pdf_texts.append(waee_text)
 pdf_texts.append("")
 
 # YAN Locations
-pdf_texts.append("YAN Locations")
+pdf_texts.append("YAN LOCATIONS")
 locations = {
     "Watusongu": "72.09.06.2006",
     "Wontowu": "72.09.06.2019",
@@ -393,12 +395,12 @@ st.image(angin_url, use_container_width=True)
 st.caption(f"Source: {angin_url}")
 
 st.header("WAMM - Sam Ratulangi International Airport (Manado)")
-st.subheader("METAR")
-st.text(metar_raw)
-st.caption(f"Source: {metar_url}")
-st.subheader("TAF")
 st.text(taf_raw)
-st.caption(f"Source: {taf_url}")
+st.text(metar_raw)
+st.write("")  # line space
+st.write(wamm_bmkg_text)
+st.caption("Source: https://aviationweather.gov/api/")
+st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAMM")
 
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
 st.write(waff_text)
@@ -416,7 +418,7 @@ st.header("WAEE - Sultan Babullah Airport (Ternate)")
 st.write(waee_text)
 st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAEE")
 
-st.header("YAN Locations")
+st.header("YAN LOCATIONS")
 if rows:
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
@@ -430,7 +432,7 @@ st.caption("Source: https://www.windy.com (cannot be saved to PDF)")
 st.download_button(
     label="Save PDF",
     data=pdf_bytes,
-    file_name=f"Yan_Weather_Report_{now.replace(' ', '_').replace(':', '')}.pdf",
+    file_name=f"Yan_Weather_Brief_{now.replace(' ', '_').replace(':', '')}.pdf",
     mime="application/pdf",
     key="pdf_bottom"
 )
