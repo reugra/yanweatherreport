@@ -7,7 +7,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-# Version 1.8
+# Version 1.9
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -192,9 +192,21 @@ def generate_pdf(timestamp, texts, image_urls):
     pdf.set_xy(12, 155)
     pdf.set_font("Helvetica", size=8)
     for line in texts:
-        safe = line.replace("–", "-").replace("—", "-").replace("°", " deg")
-        pdf.multi_cell(0, 4, safe)
-        pdf.ln(0.3)
+        # Stronger cleaning for FPDF latin-1 fonts
+        safe = (line
+                .replace("–", "-")
+                .replace("—", "-")
+                .replace("°", " deg")
+                .replace("•", " - ")
+                .replace("•", " - ")
+                .encode("ascii", "ignore")
+                .decode("ascii"))
+        try:
+            pdf.multi_cell(0, 4, safe)
+            pdf.ln(0.3)
+        except Exception:
+            pdf.multi_cell(0, 4, "[text encoding error]")
+            pdf.ln(0.3)
 
     return bytes(pdf.output())
 
