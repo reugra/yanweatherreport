@@ -7,7 +7,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-# Version 2.3
+# Version 2.4
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -274,7 +274,6 @@ if waff_data:
     if waff_data.get("visibility"):
         parts.append(f"Visibility {waff_data['visibility']}")
 
-    # Combined wind: direction + speed in knots
     wind_parts = []
     if waff_data.get("wind_dir"):
         abbr = dir_map.get(waff_data["wind_dir"].lower(), waff_data["wind_dir"])
@@ -322,8 +321,8 @@ else:
 
 pdf_texts.append("")
 
-# Sulawesi Tengah locations
-pdf_texts.append("SULAWESI TENGAH LOCATIONS")
+# YAN Locations
+pdf_texts.append("YAN LOCATIONS")
 locations = {
     "Watusongu": "72.09.06.2006",
     "Wontowu": "72.09.06.2005",
@@ -331,6 +330,8 @@ locations = {
     "Kayupoli": "72.12.08.2019",
     "Kolakolamon": "72.01.09.2037",
     "Lokait": "72.01.17.2012",
+    "Waimiha": "82.08.07.2006",
+    "Lili": "82.06.09.2004",
 }
 rows = []
 for name, adm4 in locations.items():
@@ -406,7 +407,7 @@ st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
 st.write(waff_text)
 st.caption(f"Source: {waff_source}")
 
-st.header("SULAWESI TENGAH LOCATIONS")
+st.header("YAN LOCATIONS")
 if rows:
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
