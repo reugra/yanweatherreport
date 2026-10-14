@@ -425,7 +425,7 @@ st.caption("Source: https://api.bmkg.go.id/publik/prakiraan-cuaca")
 st.header("WINDY.COM")
 windy_embed = "https://embed.windy.com/embed2.html?lat=-1.0&lon=121.0&detailLat=-1.0&detailLon=121.0&width=650&height=450&zoom=6&level=surface&overlay=rain&product=ecmwf&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1"
 st.components.v1.iframe(windy_embed, height=500)
-st.caption("Source: https://www.windy.com (low-level winds, central Sulawesi)")
+st.caption("Source: https://www.windy.com (cannot be saved to PDF)")
 
 st.download_button(
     label="Save PDF",
