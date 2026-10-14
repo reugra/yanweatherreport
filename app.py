@@ -1,3 +1,4 @@
+# Version 2.8 – WAFF scraper generalized; WAFW and WAEE added with identical method
 import streamlit as st
 import requests
 import pandas as pd
@@ -7,7 +8,6 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-# Version 2.4
 st.set_page_config(page_title="Yan Weather Report", layout="wide")
 
 # ---------- Red button style ----------
@@ -43,9 +43,9 @@ def get_bmkg_current(adm4):
     except Exception as e:
         return None, None, str(e)
 
-# ---------- Helper: Scrape WAFF current conditions from bandara page ----------
-def scrape_waff_bandara():
-    url = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
+# ---------- Helper: Scrape airport current conditions from bandara page ----------
+def scrape_bandara(icao):
+    url = f"https://www.bmkg.go.id/cuaca/bandara/{icao}"
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -54,7 +54,7 @@ def scrape_waff_bandara():
         }
         resp = requests.get(url, headers=headers, timeout=15)
         if resp.status_code != 200:
-            return None, f"HTTP {resp.status_code}", []
+            return None, f"HTTP {resp.status_code}"
 
         soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
@@ -131,13 +131,57 @@ def scrape_waff_bandara():
                         result["dewpoint"] = m.group(0).strip()
 
         result = {k: v for k, v in result.items() if v}
-
-        if result:
-            return result, None, []
-        return None, "No key fields parsed", []
+        return result if result else None, None
 
     except Exception as e:
-        return None, str(e), []
+        return None, str(e)
+
+def format_airport_text(data):
+    if not data:
+        return "Not available"
+    dir_map = {
+        "utara": "N",
+        "timur laut": "NE",
+        "timur": "E",
+        "tenggara": "SE",
+        "selatan": "S",
+        "barat daya": "SW",
+        "barat": "W",
+        "barat laut": "NW",
+        "variabel": "VRB",
+    }
+    parts = []
+    if data.get("datetime"):
+        parts.append(data["datetime"])
+    if data.get("temp"):
+        parts.append(data["temp"])
+    if data.get("weather"):
+        parts.append(data["weather"])
+    if data.get("visibility"):
+        parts.append(f"Visibility {data['visibility']}")
+
+    wind_parts = []
+    if data.get("wind_dir"):
+        abbr = dir_map.get(data["wind_dir"].lower(), data["wind_dir"])
+        wind_parts.append(abbr)
+    if data.get("wind_speed"):
+        try:
+            kmh_str = re.search(r"[\d.]+", data["wind_speed"])
+            if kmh_str:
+                kmh = float(kmh_str.group())
+                kt = round(kmh / 1.852, 1)
+                wind_parts.append(f"{kt} kt")
+        except Exception:
+            wind_parts.append(data["wind_speed"])
+    if wind_parts:
+        parts.append("Wind " + " ".join(wind_parts))
+
+    if data.get("pressure"):
+        parts.append(data["pressure"])
+    if data.get("dewpoint"):
+        parts.append(f"Dewpoint {data['dewpoint']}")
+
+    return " | ".join(parts) if parts else "Parsed but empty"
 
 # ---------- Helper: Generate PDF (half-page layout) ----------
 def generate_pdf(timestamp, texts, image_urls):
@@ -247,78 +291,23 @@ pdf_texts.append("")
 
 # WAFF
 pdf_texts.append("WAFF - Mutiara SIS Al-Jufrie (Palu)")
-waff_data, waff_err, _ = scrape_waff_bandara()
-waff_text = "Not available"
-waff_source = "https://www.bmkg.go.id/cuaca/bandara/WAFF"
+waff_data, waff_err = scrape_bandara("WAFF")
+waff_text = format_airport_text(waff_data) if waff_data else f"Not available ({waff_err})"
+pdf_texts.append(waff_text)
+pdf_texts.append("")
 
-dir_map = {
-    "utara": "N",
-    "timur laut": "NE",
-    "timur": "E",
-    "tenggara": "SE",
-    "selatan": "S",
-    "barat daya": "SW",
-    "barat": "W",
-    "barat laut": "NW",
-    "variabel": "VRB",
-}
+# WAFW
+pdf_texts.append("WAFW - Syukuran Aminuddin Amir Airport (Luwuk)")
+wafw_data, wafw_err = scrape_bandara("WAFW")
+wafw_text = format_airport_text(wafw_data) if wafw_data else f"Not available ({wafw_err})"
+pdf_texts.append(wafw_text)
+pdf_texts.append("")
 
-if waff_data:
-    parts = []
-    if waff_data.get("datetime"):
-        parts.append(waff_data["datetime"])
-    if waff_data.get("temp"):
-        parts.append(waff_data["temp"])
-    if waff_data.get("weather"):
-        parts.append(waff_data["weather"])
-    if waff_data.get("visibility"):
-        parts.append(f"Visibility {waff_data['visibility']}")
-
-    wind_parts = []
-    if waff_data.get("wind_dir"):
-        abbr = dir_map.get(waff_data["wind_dir"].lower(), waff_data["wind_dir"])
-        wind_parts.append(abbr)
-    if waff_data.get("wind_speed"):
-        try:
-            kmh_str = re.search(r"[\d.]+", waff_data["wind_speed"])
-            if kmh_str:
-                kmh = float(kmh_str.group())
-                kt = round(kmh / 1.852, 1)
-                wind_parts.append(f"{kt} kt")
-        except Exception:
-            wind_parts.append(waff_data["wind_speed"])
-    if wind_parts:
-        parts.append("Wind " + " ".join(wind_parts))
-
-    if waff_data.get("pressure"):
-        parts.append(waff_data["pressure"])
-    if waff_data.get("dewpoint"):
-        parts.append(f"Dewpoint {waff_data['dewpoint']}")
-
-    waff_text = " | ".join(parts) if parts else "Parsed but empty"
-    pdf_texts.append(waff_text)
-else:
-    waff_adm4 = "72.71.06.1001"
-    waff_item, _, api_err = get_bmkg_current(waff_adm4)
-    if waff_item:
-        ws_kmh = waff_item.get("ws") or 0
-        ws_kt = round(float(ws_kmh) / 1.852, 1) if ws_kmh else ""
-        vis = waff_item.get("vs_text") or waff_item.get("vs") or "N/A"
-        waff_text = (
-            f"{waff_item.get('utc_datetime', '')} UTC | "
-            f"{waff_item.get('t', '')} deg C | "
-            f"Wind {waff_item.get('wd', '')} {ws_kt} kt | "
-            f"Clouds {waff_item.get('tcc', '')}% | "
-            f"Vis {vis} | "
-            f"{waff_item.get('weather_desc_en') or waff_item.get('weather_desc', '')}"
-        )
-        pdf_texts.append(waff_text)
-        waff_source = f"https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4={waff_adm4} (fallback)"
-    else:
-        waff_text = f"WAFF data not available: {waff_err or api_err}"
-        pdf_texts.append(waff_text)
-        waff_source = "Unavailable"
-
+# WAEE
+pdf_texts.append("WAEE - Sultan Babullah Airport (Ternate)")
+waee_data, waee_err = scrape_bandara("WAEE")
+waee_text = format_airport_text(waee_data) if waee_data else f"Not available ({waee_err})"
+pdf_texts.append(waee_text)
 pdf_texts.append("")
 
 # YAN Locations
@@ -406,7 +395,15 @@ st.caption(f"Source: {taf_url}")
 
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
 st.write(waff_text)
-st.caption(f"Source: {waff_source}")
+st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAFF")
+
+st.header("WAFW - Syukuran Aminuddin Amir Airport (Luwuk)")
+st.write(wafw_text)
+st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAFW")
+
+st.header("WAEE - Sultan Babullah Airport (Ternate)")
+st.write(waee_text)
+st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAEE")
 
 st.header("YAN LOCATIONS")
 if rows:
