@@ -1,4 +1,4 @@
-# Version 2.14 – PDF page 2 text start raised by ~5 lines
+# Version 2.15 – WAPP (Pattimura / Ambon) added after WAEE
 import streamlit as st
 import requests
 import pandas as pd
@@ -384,6 +384,13 @@ waee_text = format_airport_text(waee_data) if waee_data else f"Not available ({w
 pdf_texts.append(waee_text)
 pdf_texts.append("")
 
+# WAPP
+pdf_texts.append("WAPP - Pattimura Airport (Ambon)")
+wapp_data, wapp_err = scrape_bandara("WAPP")
+wapp_text = format_airport_text(wapp_data) if wapp_data else f"Not available ({wapp_err})"
+pdf_texts.append(wapp_text)
+pdf_texts.append("")
+
 # YAN Locations
 pdf_texts.append("BMKG FORECASTS - YAN LOCATIONS")
 locations = {
@@ -551,6 +558,10 @@ st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAFP")
 st.header("WAEE - Sultan Babullah Airport (Ternate)")
 st.write(waee_text)
 st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAEE")
+
+st.header("WAPP - Pattimura Airport (Ambon)")
+st.write(wapp_text)
+st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAPP")
 
 st.header("BMKG FORECASTS - YAN LOCATIONS")
 if rows:
