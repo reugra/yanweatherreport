@@ -534,7 +534,7 @@ st.text(taf_raw)
 st.text(metar_raw)
 st.write("")  # line space
 st.write(wamm_bmkg_text)
-st.caption("Source: https://aviationweather.gov/api/ (TAF/METAR) and https://www.bmkg.go.id/cuaca/bandara/WAMM"
+st.caption("Sources: https://aviationweather.gov/api/ (TAF/METAR) and https://www.bmkg.go.id/cuaca/bandara/WAMM")
 
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
 st.write(waff_text)
