@@ -1,4 +1,4 @@
-# Version 2.18 – Open-Meteo wind directions always 3 digits with leading zeros
+# Version 2.19 – PDF images resized to reduce file size (JPEG quality 70)
 import streamlit as st
 import requests
 import pandas as pd
@@ -7,6 +7,7 @@ from fpdf import FPDF
 from io import BytesIO
 from bs4 import BeautifulSoup
 import re
+from PIL import Image
 
 st.set_page_config(page_title="YAN Weather Brief", layout="wide")
 
@@ -248,6 +249,25 @@ def format_wind_pair(speed, direction):
     except Exception:
         return "N/A"
 
+# ---------- Helper: Resize image for smaller PDF ----------
+def resize_image_bytes(img_bytes, max_width=900, quality=70):
+    """Resize image to max_width (preserve aspect ratio) and return JPEG bytes."""
+    try:
+        img = Image.open(BytesIO(img_bytes))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        w, h = img.size
+        if w > max_width:
+            ratio = max_width / float(w)
+            new_h = int(h * ratio)
+            img = img.resize((max_width, new_h), Image.LANCZOS)
+        out = BytesIO()
+        img.save(out, format="JPEG", quality=quality, optimize=True)
+        out.seek(0)
+        return out
+    except Exception:
+        return BytesIO(img_bytes)
+
 # ---------- Helper: Generate PDF (half-page layout) ----------
 def generate_pdf(timestamp, texts, image_urls):
     pdf = FPDF()
@@ -265,7 +285,8 @@ def generate_pdf(timestamp, texts, image_urls):
     try:
         img_resp = requests.get(image_urls[0][1], timeout=15)
         if img_resp.status_code == 200:
-            pdf.image(BytesIO(img_resp.content), x=20, y=30, w=160)
+            resized = resize_image_bytes(img_resp.content, max_width=900, quality=70)
+            pdf.image(resized, x=20, y=30, w=160)
     except Exception:
         pdf.set_xy(20, 40)
         pdf.cell(0, 5, "Himawari IR Enhanced - not available")
@@ -273,7 +294,8 @@ def generate_pdf(timestamp, texts, image_urls):
     try:
         img_resp = requests.get(image_urls[1][1], timeout=15)
         if img_resp.status_code == 200:
-            pdf.image(BytesIO(img_resp.content), x=20, y=155, w=160)
+            resized = resize_image_bytes(img_resp.content, max_width=900, quality=70)
+            pdf.image(resized, x=20, y=155, w=160)
     except Exception:
         pdf.set_xy(20, 165)
         pdf.cell(0, 5, "Citra Sebaran Asap - not available")
@@ -283,8 +305,9 @@ def generate_pdf(timestamp, texts, image_urls):
     try:
         img_resp = requests.get(image_urls[2][1], timeout=15)
         if img_resp.status_code == 200:
+            resized = resize_image_bytes(img_resp.content, max_width=800, quality=70)
             # ~90% of previous width (160 → 144), aspect ratio preserved
-            pdf.image(BytesIO(img_resp.content), x=20, y=15, w=144)
+            pdf.image(resized, x=20, y=15, w=144)
     except Exception:
         pdf.set_xy(20, 25)
         pdf.cell(0, 5, "BMKG Prakiraan Angin - not available")
