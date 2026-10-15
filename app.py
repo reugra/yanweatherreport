@@ -1,4 +1,4 @@
-# Version 2.12 – Open-Meteo: 80 m only, current/+2h/+4h (rounded 30 min), dir/speed format, no elev
+# Version 2.13 – Open-Meteo locations updated to user-supplied DMS points
 import streamlit as st
 import requests
 import pandas as pd
@@ -432,15 +432,15 @@ for name, adm4 in locations.items():
         })
         pdf_texts.append(f"{name}: Error - {err}")
 
-# ---------- Open-Meteo Wind Locations (edit lat/lon as needed) ----------
+# ---------- Open-Meteo Wind Locations ----------
 openmeteo_locations = {
-    "Manado area": (-1.55, 124.92),
-    "Palu area": (-0.92, 119.91),
-    "Luwuk area": (-1.04, 122.77),
-    "Poso area": (-1.38, 120.73),
-    "Ternate area": (0.83, 127.38),
-    # Add your exact points here, e.g.:
-    # "Watusongu": (-1.xx, 124.xx),
+    "Wontowu": (-1.221833, 121.646667),
+    "Paramba": (-1.3715, 121.782833),
+    "Padalempe": (-1.396167, 121.6735),
+    "Kolakolamon": (-1.116667, 122.116167),
+    "Moitoitom": (-0.911117, 122.29),
+    "Waimiha": (-1.899667, 124.720333),
+    "Lili": (1.265833, 128.703),
 }
 
 pdf_texts.append("")
@@ -533,8 +533,7 @@ st.text(taf_raw)
 st.text(metar_raw)
 st.write("")  # line space
 st.write(wamm_bmkg_text)
-st.caption("Source: https://aviationweather.gov/api/")
-st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAMM")
+st.caption("Sources: https://aviationweather.gov/api/ (METAR/TAF) and https://www.bmkg.go.id/cuaca/bandara/WAMM")
 
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
 st.write(waff_text)
