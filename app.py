@@ -8,7 +8,7 @@ from io import BytesIO
 from bs4 import BeautifulSoup
 import re
 
-st.set_page_config(page_title="Yan Weather Brief", layout="wide")
+st.set_page_config(page_title="YAN Weather Brief", layout="wide")
 
 # ---------- Red button style ----------
 st.markdown("""
@@ -257,7 +257,7 @@ def generate_pdf(timestamp, texts, image_urls):
     pdf.add_page()
     pdf.set_font("Helvetica", size=13)
     pdf.set_xy(12, 12)
-    pdf.cell(0, 7, "Yan Weather Brief", ln=True, align="C")
+    pdf.cell(0, 7, "YAN Weather Brief", ln=True, align="C")
     pdf.set_font("Helvetica", size=9)
     pdf.cell(0, 5, timestamp, ln=True, align="C")
 
@@ -385,7 +385,7 @@ pdf_texts.append(waee_text)
 pdf_texts.append("")
 
 # YAN Locations
-pdf_texts.append("YAN LOCATIONS")
+pdf_texts.append("BMKG FORECASTS - YAN LOCATIONS")
 locations = {
     "Watusongu": "72.09.06.2006",
     "Wontowu": "72.09.06.2019",
@@ -445,7 +445,7 @@ openmeteo_locations = {
 }
 
 pdf_texts.append("")
-pdf_texts.append("OPEN-METEO WIND (80 m AGL)")
+pdf_texts.append("OPEN-METEO FORECASTS - YAN LOCATIONS")
 openmeteo_rows = []
 time_headers = ["Current", "—", "—"]  # will be updated on first successful call
 
@@ -509,7 +509,7 @@ pdf_bytes = generate_pdf(now, pdf_texts, image_list)
 st.download_button(
     label="Save PDF",
     data=pdf_bytes,
-    file_name=f"Yan_Weather_Report_{now.replace(' ', '_').replace(':', '')}.pdf",
+    file_name=f"YAN_Weather_Brief_{now.replace(' ', '_').replace(':', '')}.pdf",
     mime="application/pdf",
     key="pdf_top"
 )
@@ -552,13 +552,13 @@ st.header("WAEE - Sultan Babullah Airport (Ternate)")
 st.write(waee_text)
 st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAEE")
 
-st.header("YAN LOCATIONS")
+st.header("BMKG FORECASTS")
 if rows:
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
 st.caption("Source: https://api.bmkg.go.id/publik/prakiraan-cuaca")
 
-st.header("OPEN-METEO WIND")
+st.header("OPEN-METEO WIND FORECASTS")
 if openmeteo_rows:
     # Ensure consistent columns even if some failed
     om_df = pd.DataFrame(openmeteo_rows)
@@ -575,7 +575,7 @@ st.caption("Source: https://www.windy.com (cannot be saved to PDF)")
 st.download_button(
     label="Save PDF",
     data=pdf_bytes,
-    file_name=f"Yan_Weather_Brief_{now.replace(' ', '_').replace(':', '')}.pdf",
+    file_name=f"YAN_Weather_Brief_{now.replace(' ', '_').replace(':', '')}.pdf",
     mime="application/pdf",
     key="pdf_bottom"
 )
