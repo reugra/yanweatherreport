@@ -193,7 +193,7 @@ def generate_pdf(timestamp, texts, image_urls):
     pdf.add_page()
     pdf.set_font("Helvetica", size=13)
     pdf.set_xy(12, 12)
-    pdf.cell(0, 7, "Yan Weather Report", ln=True, align="C")
+    pdf.cell(0, 7, "Yan Weather Brief", ln=True, align="C")
     pdf.set_font("Helvetica", size=9)
     pdf.cell(0, 5, timestamp, ln=True, align="C")
 
