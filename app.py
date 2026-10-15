@@ -1,4 +1,4 @@
-# Version 2.13 – Open-Meteo locations updated to user-supplied DMS points
+# Version 2.14 – PDF page 2 text start raised by ~5 lines
 import streamlit as st
 import requests
 import pandas as pd
@@ -287,7 +287,8 @@ def generate_pdf(timestamp, texts, image_urls):
         pdf.set_xy(20, 25)
         pdf.cell(0, 5, "BMKG Prakiraan Angin - not available")
 
-    pdf.set_xy(12, 155)
+    # Text starts ~5 lines higher on page 2 only (was 155, now 134)
+    pdf.set_xy(12, 134)
     pdf.set_font("Helvetica", size=8)
     for line in texts:
         safe = (line
@@ -533,7 +534,7 @@ st.text(taf_raw)
 st.text(metar_raw)
 st.write("")  # line space
 st.write(wamm_bmkg_text)
-st.caption("Sources: https://aviationweather.gov/api/ (METAR/TAF) and https://www.bmkg.go.id/cuaca/bandara/WAMM")
+st.caption("Source: https://aviationweather.gov/api/ (TAF/METAR) and https://www.bmkg.go.id/cuaca/bandara/WAMM"
 
 st.header("WAFF - Mutiara SIS Al-Jufrie (Palu)")
 st.write(waff_text)
@@ -564,7 +565,7 @@ if openmeteo_rows:
     # Drop any temporary error columns if present for display
     display_cols = [c for c in om_df.columns if c not in ("Error", "—", "— ")]
     st.dataframe(om_df[display_cols], use_container_width=True, hide_index=True)
-st.caption("Wind at 80 m AGL. Source: https://api.open-meteo.com/v1/forecast")
+st.caption("Forecast wind at 80 m AGL. Source: https://api.open-meteo.com/v1/forecast")
 
 st.header("WINDY.COM")
 windy_embed = "https://embed.windy.com/embed2.html?lat=-1.0&lon=121.0&detailLat=-1.0&detailLon=121.0&width=650&height=450&zoom=6&level=surface&overlay=rain&product=ecmwf&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1"
