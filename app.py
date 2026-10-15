@@ -516,7 +516,7 @@ st.download_button(
 
 st.header(f"Timestamp: {now}")
 
-st.header("Satellite Images")
+st.header("SATELLITE IMAGES")
 st.subheader("Himawari IR Enhanced")
 st.image(himawari_url, use_container_width=True)
 st.caption(f"Source: {himawari_url}")
@@ -525,7 +525,7 @@ st.subheader("Citra Sebaran Asap")
 st.image(asap_url, use_container_width=True)
 st.caption(f"Source: {asap_url}")
 
-st.header("BMKG Prakiraan Angin")
+st.header("BMKG PRAKIRAAN ANGIN")
 st.image(angin_url, use_container_width=True)
 st.caption(f"Source: {angin_url}")
 
@@ -552,13 +552,13 @@ st.header("WAEE - Sultan Babullah Airport (Ternate)")
 st.write(waee_text)
 st.caption("Source: https://www.bmkg.go.id/cuaca/bandara/WAEE")
 
-st.header("BMKG FORECASTS")
+st.header("BMKG FORECASTS - YAN LOCATIONS")
 if rows:
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
 st.caption("Source: https://api.bmkg.go.id/publik/prakiraan-cuaca")
 
-st.header("OPEN-METEO WIND FORECASTS")
+st.header("OPEN-METEO WIND FORECASTS - YAN LOCATIONS")
 if openmeteo_rows:
     # Ensure consistent columns even if some failed
     om_df = pd.DataFrame(openmeteo_rows)
