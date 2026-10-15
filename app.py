@@ -1,8 +1,8 @@
-# Version 2.11 – Open-Meteo wind at lat/long + heights/pressure levels added
+# Version 2.12 – Open-Meteo: 80 m only, current/+2h/+4h (rounded 30 min), dir/speed format, no elev
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from fpdf import FPDF
 from io import BytesIO
 from bs4 import BeautifulSoup
@@ -183,59 +183,69 @@ def format_airport_text(data):
 
     return " | ".join(parts) if parts else "Parsed but empty"
 
-# ---------- Helper: Open-Meteo wind at heights / pressure levels ----------
-def get_openmeteo_wind(lat, lon, elevation=None):
+# ---------- Helper: Open-Meteo 80 m wind (current + hourly) ----------
+def get_openmeteo_wind(lat, lon):
     try:
         params = {
             "latitude": lat,
             "longitude": lon,
-            "current": (
-                "wind_speed_10m,wind_direction_10m,"
-                "wind_speed_80m,wind_direction_80m,"
-                "wind_speed_120m,wind_direction_120m,"
-                "wind_speed_180m,wind_direction_180m,"
-                "wind_speed_850hPa,wind_direction_850hPa,"
-                "wind_speed_700hPa,wind_direction_700hPa"
-            ),
+            "current": "wind_speed_80m,wind_direction_80m",
+            "hourly": "wind_speed_80m,wind_direction_80m",
             "wind_speed_unit": "kn",
             "timezone": "UTC",
             "forecast_days": 1,
         }
-        if elevation is not None:
-            params["elevation"] = elevation
         resp = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=12)
         if resp.status_code != 200:
-            return None, f"HTTP {resp.status_code}"
+            return None, None, f"HTTP {resp.status_code}"
         data = resp.json()
-        return data.get("current", {}), data.get("elevation"), None
+        return data.get("current", {}), data.get("hourly", {}), None
     except Exception as e:
         return None, None, str(e)
 
-def format_openmeteo_wind(name, current, elev):
-    if not current:
-        return f"{name}: Not available"
-    def wd(deg):
-        if deg is None:
-            return "N/A"
-        dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
-                "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
-        return dirs[int((deg % 360) / 22.5 + 0.5) % 16]
+def round_to_nearest_30(dt):
+    """Round datetime to nearest 30 minutes."""
+    minutes = dt.minute
+    if minutes < 15:
+        return dt.replace(minute=0, second=0, microsecond=0)
+    elif minutes < 45:
+        return dt.replace(minute=30, second=0, microsecond=0)
+    else:
+        return (dt + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
 
-    lines = [f"{name} (elev {elev:.0f} m)" if elev else name]
-    levels = [
-        ("10 m AGL", "wind_speed_10m", "wind_direction_10m"),
-        ("80 m AGL", "wind_speed_80m", "wind_direction_80m"),
-        ("120 m AGL", "wind_speed_120m", "wind_direction_120m"),
-        ("180 m AGL", "wind_speed_180m", "wind_direction_180m"),
-        ("850 hPa (~1.5 km)", "wind_speed_850hPa", "wind_direction_850hPa"),
-        ("700 hPa (~3 km)", "wind_speed_700hPa", "wind_direction_700hPa"),
-    ]
-    for label, spd_key, dir_key in levels:
-        spd = current.get(spd_key)
-        direc = current.get(dir_key)
-        if spd is not None:
-            lines.append(f"  {label}: {spd:.1f} kt {wd(direc)}")
-    return "\n".join(lines)
+def format_time_header(dt):
+    """Format as 24MAY/0200 UTC"""
+    return dt.strftime("%d%b/%H%M UTC").upper()
+
+def get_wind_at_offset(hourly, current_time_str, hours_offset):
+    """Return (speed, direction) closest to current + offset hours."""
+    if not hourly or not hourly.get("time"):
+        return None, None
+    try:
+        base = datetime.fromisoformat(current_time_str.replace("Z", ""))
+        target = base + timedelta(hours=hours_offset)
+        target_rounded = round_to_nearest_30(target)
+
+        times = [datetime.fromisoformat(t.replace("Z", "")) for t in hourly["time"]]
+        speeds = hourly.get("wind_speed_80m", [])
+        dirs = hourly.get("wind_direction_80m", [])
+
+        # Find closest hourly slot to the rounded target
+        best_idx = min(range(len(times)), key=lambda i: abs((times[i] - target_rounded).total_seconds()))
+        if best_idx < len(speeds) and best_idx < len(dirs):
+            return speeds[best_idx], dirs[best_idx]
+    except Exception:
+        pass
+    return None, None
+
+def format_wind_pair(speed, direction):
+    """Format as direction/speed kt e.g. 240/2.2 kt"""
+    if speed is None or direction is None:
+        return "N/A"
+    try:
+        return f"{int(round(direction))}/{float(speed):.1f} kt"
+    except Exception:
+        return "N/A"
 
 # ---------- Helper: Generate PDF (half-page layout) ----------
 def generate_pdf(timestamp, texts, image_urls):
@@ -422,42 +432,75 @@ for name, adm4 in locations.items():
         })
         pdf_texts.append(f"{name}: Error - {err}")
 
-# ---------- Open-Meteo Wind Locations (edit lat/lon/elev as needed) ----------
-# Format: "Name": (latitude, longitude, elevation_m or None)
+# ---------- Open-Meteo Wind Locations (edit lat/lon as needed) ----------
 openmeteo_locations = {
-    "Manado area": (-1.55, 124.92, None),
-    "Palu area": (-0.92, 119.91, None),
-    "Luwuk area": (-1.04, 122.77, None),
-    "Poso area": (-1.38, 120.73, None),
-    "Ternate area": (0.83, 127.38, None),
-    # Add your exact YAN or other points here, e.g.:
-    # "Watusongu": (-1.xx, 124.xx, 150),
+    "Manado area": (-1.55, 124.92),
+    "Palu area": (-0.92, 119.91),
+    "Luwuk area": (-1.04, 122.77),
+    "Poso area": (-1.38, 120.73),
+    "Ternate area": (0.83, 127.38),
+    # Add your exact points here, e.g.:
+    # "Watusongu": (-1.xx, 124.xx),
 }
 
 pdf_texts.append("")
-pdf_texts.append("OPEN-METEO WIND")
+pdf_texts.append("OPEN-METEO WIND (80 m AGL)")
 openmeteo_rows = []
-for name, (lat, lon, elev) in openmeteo_locations.items():
-    current, api_elev, err = get_openmeteo_wind(lat, lon, elev)
-    used_elev = elev if elev is not None else api_elev
-    formatted = format_openmeteo_wind(name, current, used_elev)
-    pdf_texts.append(formatted)
-    pdf_texts.append("")
-    if current:
+time_headers = ["Current", "—", "—"]  # will be updated on first successful call
+
+for name, (lat, lon) in openmeteo_locations.items():
+    current, hourly, err = get_openmeteo_wind(lat, lon)
+    if not current or not current.get("time"):
         openmeteo_rows.append({
             "Location": name,
-            "Lat": lat,
-            "Lon": lon,
-            "Elev m": round(used_elev) if used_elev else "N/A",
-            "10m kt/dir": f"{current.get('wind_speed_10m', 'N/A'):.1f} / {current.get('wind_direction_10m', 'N/A')}" if current.get('wind_speed_10m') is not None else "N/A",
-            "80m kt/dir": f"{current.get('wind_speed_80m', 'N/A'):.1f} / {current.get('wind_direction_80m', 'N/A')}" if current.get('wind_speed_80m') is not None else "N/A",
-            "120m kt/dir": f"{current.get('wind_speed_120m', 'N/A'):.1f} / {current.get('wind_direction_120m', 'N/A')}" if current.get('wind_speed_120m') is not None else "N/A",
-            "180m kt/dir": f"{current.get('wind_speed_180m', 'N/A'):.1f} / {current.get('wind_direction_180m', 'N/A')}" if current.get('wind_speed_180m') is not None else "N/A",
-            "850hPa kt/dir": f"{current.get('wind_speed_850hPa', 'N/A'):.1f} / {current.get('wind_direction_850hPa', 'N/A')}" if current.get('wind_speed_850hPa') is not None else "N/A",
-            "700hPa kt/dir": f"{current.get('wind_speed_700hPa', 'N/A'):.1f} / {current.get('wind_direction_700hPa', 'N/A')}" if current.get('wind_speed_700hPa') is not None else "N/A",
+            "Lat/Lon": f"{lat:.4f}, {lon:.4f}",
+            "Current": "N/A",
+            "—": "N/A",
+            "— ": "N/A",
+            "Error": err or "No data"
         })
-    else:
-        openmeteo_rows.append({"Location": name, "Error": err or "No data"})
+        pdf_texts.append(f"{name} ({lat:.4f}, {lon:.4f}): Not available")
+        continue
+
+    current_time_str = current.get("time")
+    try:
+        base_dt = datetime.fromisoformat(current_time_str.replace("Z", ""))
+        t2 = round_to_nearest_30(base_dt + timedelta(hours=2))
+        t4 = round_to_nearest_30(base_dt + timedelta(hours=4))
+        if time_headers[1] == "—":
+            time_headers = [
+                "Current",
+                format_time_header(t2),
+                format_time_header(t4)
+            ]
+    except Exception:
+        t2 = t4 = None
+
+    # Current (from current endpoint)
+    cur_spd = current.get("wind_speed_80m")
+    cur_dir = current.get("wind_direction_80m")
+    cur_str = format_wind_pair(cur_spd, cur_dir)
+
+    # +2 h and +4 h from hourly
+    spd2, dir2 = get_wind_at_offset(hourly, current_time_str, 2)
+    spd4, dir4 = get_wind_at_offset(hourly, current_time_str, 4)
+    str2 = format_wind_pair(spd2, dir2)
+    str4 = format_wind_pair(spd4, dir4)
+
+    openmeteo_rows.append({
+        "Location": name,
+        "Lat/Lon": f"{lat:.4f}, {lon:.4f}",
+        time_headers[0]: cur_str,
+        time_headers[1]: str2,
+        time_headers[2]: str4,
+    })
+
+    pdf_texts.append(
+        f"{name} ({lat:.4f}, {lon:.4f}) | "
+        f"Current: {cur_str} | "
+        f"{time_headers[1]}: {str2} | "
+        f"{time_headers[2]}: {str4}"
+    )
 
 pdf_bytes = generate_pdf(now, pdf_texts, image_list)
 
@@ -517,9 +560,12 @@ st.caption("Source: https://api.bmkg.go.id/publik/prakiraan-cuaca")
 
 st.header("OPEN-METEO WIND")
 if openmeteo_rows:
+    # Ensure consistent columns even if some failed
     om_df = pd.DataFrame(openmeteo_rows)
-    st.dataframe(om_df, use_container_width=True, hide_index=True)
-st.caption("Source: https://api.open-meteo.com/v1/forecast (10/80/120/180 m AGL + 850/700 hPa). Edit openmeteo_locations in code for exact lat/lon/elevation.")
+    # Drop any temporary error columns if present for display
+    display_cols = [c for c in om_df.columns if c not in ("Error", "—", "— ")]
+    st.dataframe(om_df[display_cols], use_container_width=True, hide_index=True)
+st.caption("Wind at 80 m AGL. Source: https://api.open-meteo.com/v1/forecast")
 
 st.header("WINDY.COM")
 windy_embed = "https://embed.windy.com/embed2.html?lat=-1.0&lon=121.0&detailLat=-1.0&detailLon=121.0&width=650&height=450&zoom=6&level=surface&overlay=rain&product=ecmwf&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1"
