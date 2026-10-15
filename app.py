@@ -1,4 +1,4 @@
-# Version 2.17 – PDF page 2: Angin image ~90% size; text block +2 lines higher
+# Version 2.18 – Open-Meteo wind directions always 3 digits with leading zeros
 import streamlit as st
 import requests
 import pandas as pd
@@ -239,11 +239,12 @@ def get_wind_at_offset(hourly, current_time_str, hours_offset):
     return None, None
 
 def format_wind_pair(speed, direction):
-    """Format as direction/speed kt e.g. 240/2.2 kt"""
+    """Format as direction/speed kt e.g. 045/2.2 kt or 240/3.1 kt (always 3-digit direction)"""
     if speed is None or direction is None:
         return "N/A"
     try:
-        return f"{int(round(direction))}/{float(speed):.1f} kt"
+        dir_int = int(round(direction)) % 360
+        return f"{dir_int:03d}/{float(speed):.1f} kt"
     except Exception:
         return "N/A"
 
