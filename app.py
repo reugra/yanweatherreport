@@ -1,4 +1,4 @@
-# Version 2.15 – WAPP (Pattimura / Ambon) added after WAEE
+# Version 2.16 – PDF page 2: text block +1 line higher; WAMM METAR–BMKG space removed
 import streamlit as st
 import requests
 import pandas as pd
@@ -287,8 +287,8 @@ def generate_pdf(timestamp, texts, image_urls):
         pdf.set_xy(20, 25)
         pdf.cell(0, 5, "BMKG Prakiraan Angin - not available")
 
-    # Text starts ~5 lines higher on page 2 only (was 155, now 134)
-    pdf.set_xy(12, 134)
+    # Text starts one line higher on page 2 (was 134, now 130)
+    pdf.set_xy(12, 130)
     pdf.set_font("Helvetica", size=8)
     for line in texts:
         safe = (line
@@ -348,7 +348,7 @@ except Exception as e:
 
 pdf_texts.append(taf_raw)
 pdf_texts.append(metar_raw)
-pdf_texts.append("")
+# blank line between METAR and BMKG removed
 
 # WAMM BMKG bandara
 wamm_bmkg_data, wamm_bmkg_err = scrape_bandara("WAMM")
