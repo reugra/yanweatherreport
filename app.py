@@ -1,4 +1,4 @@
-# Version 2.16 – PDF page 2: text block +1 line higher; WAMM METAR–BMKG space removed
+# Version 2.17 – PDF page 2: Angin image ~90% size; text block +2 lines higher
 import streamlit as st
 import requests
 import pandas as pd
@@ -282,13 +282,14 @@ def generate_pdf(timestamp, texts, image_urls):
     try:
         img_resp = requests.get(image_urls[2][1], timeout=15)
         if img_resp.status_code == 200:
-            pdf.image(BytesIO(img_resp.content), x=20, y=15, w=160)
+            # ~90% of previous width (160 → 144), aspect ratio preserved
+            pdf.image(BytesIO(img_resp.content), x=20, y=15, w=144)
     except Exception:
         pdf.set_xy(20, 25)
         pdf.cell(0, 5, "BMKG Prakiraan Angin - not available")
 
-    # Text starts one line higher on page 2 (was 134, now 130)
-    pdf.set_xy(12, 130)
+    # Text starts two lines higher (was 130, now 122)
+    pdf.set_xy(12, 122)
     pdf.set_font("Helvetica", size=8)
     for line in texts:
         safe = (line
