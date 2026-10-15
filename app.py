@@ -1,4 +1,4 @@
-# Version 2.10 – WAMM: TAF above METAR, BMKG bandara data added below, dual sources
+# Version 2.11 – Open-Meteo wind at lat/long + heights/pressure levels added
 import streamlit as st
 import requests
 import pandas as pd
@@ -182,6 +182,60 @@ def format_airport_text(data):
         parts.append(f"Dewpoint {data['dewpoint']}")
 
     return " | ".join(parts) if parts else "Parsed but empty"
+
+# ---------- Helper: Open-Meteo wind at heights / pressure levels ----------
+def get_openmeteo_wind(lat, lon, elevation=None):
+    try:
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current": (
+                "wind_speed_10m,wind_direction_10m,"
+                "wind_speed_80m,wind_direction_80m,"
+                "wind_speed_120m,wind_direction_120m,"
+                "wind_speed_180m,wind_direction_180m,"
+                "wind_speed_850hPa,wind_direction_850hPa,"
+                "wind_speed_700hPa,wind_direction_700hPa"
+            ),
+            "wind_speed_unit": "kn",
+            "timezone": "UTC",
+            "forecast_days": 1,
+        }
+        if elevation is not None:
+            params["elevation"] = elevation
+        resp = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=12)
+        if resp.status_code != 200:
+            return None, f"HTTP {resp.status_code}"
+        data = resp.json()
+        return data.get("current", {}), data.get("elevation"), None
+    except Exception as e:
+        return None, None, str(e)
+
+def format_openmeteo_wind(name, current, elev):
+    if not current:
+        return f"{name}: Not available"
+    def wd(deg):
+        if deg is None:
+            return "N/A"
+        dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+        return dirs[int((deg % 360) / 22.5 + 0.5) % 16]
+
+    lines = [f"{name} (elev {elev:.0f} m)" if elev else name]
+    levels = [
+        ("10 m AGL", "wind_speed_10m", "wind_direction_10m"),
+        ("80 m AGL", "wind_speed_80m", "wind_direction_80m"),
+        ("120 m AGL", "wind_speed_120m", "wind_direction_120m"),
+        ("180 m AGL", "wind_speed_180m", "wind_direction_180m"),
+        ("850 hPa (~1.5 km)", "wind_speed_850hPa", "wind_direction_850hPa"),
+        ("700 hPa (~3 km)", "wind_speed_700hPa", "wind_direction_700hPa"),
+    ]
+    for label, spd_key, dir_key in levels:
+        spd = current.get(spd_key)
+        direc = current.get(dir_key)
+        if spd is not None:
+            lines.append(f"  {label}: {spd:.1f} kt {wd(direc)}")
+    return "\n".join(lines)
 
 # ---------- Helper: Generate PDF (half-page layout) ----------
 def generate_pdf(timestamp, texts, image_urls):
@@ -368,6 +422,43 @@ for name, adm4 in locations.items():
         })
         pdf_texts.append(f"{name}: Error - {err}")
 
+# ---------- Open-Meteo Wind Locations (edit lat/lon/elev as needed) ----------
+# Format: "Name": (latitude, longitude, elevation_m or None)
+openmeteo_locations = {
+    "Manado area": (-1.55, 124.92, None),
+    "Palu area": (-0.92, 119.91, None),
+    "Luwuk area": (-1.04, 122.77, None),
+    "Poso area": (-1.38, 120.73, None),
+    "Ternate area": (0.83, 127.38, None),
+    # Add your exact YAN or other points here, e.g.:
+    # "Watusongu": (-1.xx, 124.xx, 150),
+}
+
+pdf_texts.append("")
+pdf_texts.append("OPEN-METEO WIND")
+openmeteo_rows = []
+for name, (lat, lon, elev) in openmeteo_locations.items():
+    current, api_elev, err = get_openmeteo_wind(lat, lon, elev)
+    used_elev = elev if elev is not None else api_elev
+    formatted = format_openmeteo_wind(name, current, used_elev)
+    pdf_texts.append(formatted)
+    pdf_texts.append("")
+    if current:
+        openmeteo_rows.append({
+            "Location": name,
+            "Lat": lat,
+            "Lon": lon,
+            "Elev m": round(used_elev) if used_elev else "N/A",
+            "10m kt/dir": f"{current.get('wind_speed_10m', 'N/A'):.1f} / {current.get('wind_direction_10m', 'N/A')}" if current.get('wind_speed_10m') is not None else "N/A",
+            "80m kt/dir": f"{current.get('wind_speed_80m', 'N/A'):.1f} / {current.get('wind_direction_80m', 'N/A')}" if current.get('wind_speed_80m') is not None else "N/A",
+            "120m kt/dir": f"{current.get('wind_speed_120m', 'N/A'):.1f} / {current.get('wind_direction_120m', 'N/A')}" if current.get('wind_speed_120m') is not None else "N/A",
+            "180m kt/dir": f"{current.get('wind_speed_180m', 'N/A'):.1f} / {current.get('wind_direction_180m', 'N/A')}" if current.get('wind_speed_180m') is not None else "N/A",
+            "850hPa kt/dir": f"{current.get('wind_speed_850hPa', 'N/A'):.1f} / {current.get('wind_direction_850hPa', 'N/A')}" if current.get('wind_speed_850hPa') is not None else "N/A",
+            "700hPa kt/dir": f"{current.get('wind_speed_700hPa', 'N/A'):.1f} / {current.get('wind_direction_700hPa', 'N/A')}" if current.get('wind_speed_700hPa') is not None else "N/A",
+        })
+    else:
+        openmeteo_rows.append({"Location": name, "Error": err or "No data"})
+
 pdf_bytes = generate_pdf(now, pdf_texts, image_list)
 
 # ========== PAGE DISPLAY ==========
@@ -423,6 +514,12 @@ if rows:
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
 st.caption("Source: https://api.bmkg.go.id/publik/prakiraan-cuaca")
+
+st.header("OPEN-METEO WIND")
+if openmeteo_rows:
+    om_df = pd.DataFrame(openmeteo_rows)
+    st.dataframe(om_df, use_container_width=True, hide_index=True)
+st.caption("Source: https://api.open-meteo.com/v1/forecast (10/80/120/180 m AGL + 850/700 hPa). Edit openmeteo_locations in code for exact lat/lon/elevation.")
 
 st.header("WINDY.COM")
 windy_embed = "https://embed.windy.com/embed2.html?lat=-1.0&lon=121.0&detailLat=-1.0&detailLon=121.0&width=650&height=450&zoom=6&level=surface&overlay=rain&product=ecmwf&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1"
